@@ -142,6 +142,8 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
     # 2D keypoints (pred projected)
     axes[row_i, 0].set_ylabel("2d keypoints (pred projected)", size='large')
 
+    # TODO (kristijan): Visualize 3D keypoints for all view combinations. For now, visualize N-view only.
+    keypoints_3d_batch_pred = keypoints_3d_batch_pred[:, -1, :, :]
     for view_i in range(n_cols):
         axes[row_i][view_i].imshow(images[view_i])
         keypoints_2d_pred_proj = project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), keypoints_3d_batch_pred[batch_index].detach().cpu().numpy())

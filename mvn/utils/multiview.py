@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import itertools
 
 
 class Camera:
@@ -170,17 +171,26 @@ def triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, c
 
 def triangulate_batch_of_points(proj_matricies_batch, points_batch, confidences_batch=None):
     batch_size, n_views, n_joints = points_batch.shape[:3]
-    point_3d_batch = torch.zeros(batch_size, n_joints, 3, dtype=torch.float32, device=points_batch.device)
+
+    # Generate view [0, 1, ..., n_views] combinations for subsets of length [2, ..., n_views].
+    view_combinations = [itertools.combinations(range(n_views), x) for x in range(2, n_views + 1)]
+    # Merge sublists
+    view_combinations = [j for i in view_combinations for j in i]
+    n_view_comb = len(view_combinations)
+
+    points_3d_batch = torch.zeros(batch_size, n_view_comb, n_joints, 3, dtype=torch.float32, device=points_batch.device)
 
     for batch_i in range(batch_size):
         for joint_i in range(n_joints):
-            points = points_batch[batch_i, :, joint_i, :]
+            for comb_i, v_comb in enumerate(view_combinations):
+                points = points_batch[batch_i, v_comb, joint_i, :]
+                proj_matricies = proj_matricies_batch[batch_i, v_comb]
+                confidences = confidences_batch[batch_i, v_comb, joint_i] if confidences_batch is not None else None
 
-            confidences = confidences_batch[batch_i, :, joint_i] if confidences_batch is not None else None
-            point_3d = triangulate_point_from_multiple_views_linear_torch(proj_matricies_batch[batch_i], points, confidences=confidences)
-            point_3d_batch[batch_i, joint_i] = point_3d
+                point_3d = triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, confidences=confidences)
+                points_3d_batch[batch_i, comb_i, joint_i] = point_3d
 
-    return point_3d_batch
+    return points_3d_batch
 
 
 def calc_reprojection_error_matrix(keypoints_3d, keypoints_2d_list, proj_matricies):

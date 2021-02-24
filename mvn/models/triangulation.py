@@ -185,19 +185,19 @@ class AlgebraicTriangulationNet(nn.Module):
 
         # triangulate
         try:
-            keypoints_3d = multiview.triangulate_batch_of_points(
+            poses_3d = multiview.triangulate_batch_of_points(
                 proj_matricies, keypoints_2d,
                 confidences_batch=alg_confidences
             )
         except RuntimeError as e:
             print("Error: ", e)
 
-            print("confidences =", confidences_batch_pred)
+            print("confidences =", alg_confidences)
             print("proj_matricies = ", proj_matricies)
-            print("keypoints_2d_batch_pred =", keypoints_2d_batch_pred)
+            print("keypoints_2d_batch_pred =", keypoints_2d)
             exit()
 
-        return keypoints_3d, keypoints_2d, heatmaps, alg_confidences
+        return poses_3d, keypoints_2d, heatmaps, alg_confidences
 
 
 class VolumetricTriangulationNet(nn.Module):

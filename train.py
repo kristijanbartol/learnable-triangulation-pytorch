@@ -191,7 +191,9 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                     keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, proj_matricies_batch, batch)
 
                 batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[3:])
-                n_joints = keypoints_3d_pred.shape[1]
+
+                # dims(keypoints_3d_pred) = (batch, n_view_comb, n_joints)
+                n_joints = keypoints_3d_pred.shape[2]
 
                 keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
 
@@ -209,7 +211,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                     keypoints_3d_gt = keypoints_3d_gt_transformed
 
                     keypoints_3d_pred_transformed = keypoints_3d_pred.clone()
-                    keypoints_3d_pred_transformed[:, torch.arange(n_joints) != base_joint] -= keypoints_3d_pred_transformed[:, base_joint:base_joint + 1]
+                    keypoints_3d_pred_transformed[:, :, torch.arange(n_joints) != base_joint] -= keypoints_3d_pred_transformed[:, :, base_joint:base_joint + 1]
                     keypoints_3d_pred = keypoints_3d_pred_transformed
 
                 # calculate loss
