@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import itertools
+import time
 
 
 class Camera:
@@ -140,31 +141,35 @@ def triangulate_point_from_multiple_views_linear(proj_matricies, points):
 
 
 def triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, confidences=None):
-    """Similar as triangulate_point_from_multiple_views_linear() but for PyTorch.
-    For more information see its documentation.
+    """Triangulate batch of points. 
+    Squeeze B and J into the batch channel for parallel computation.
     Args:
-        proj_matricies torch tensor of shape (N, 3, 4): sequence of projection matricies (3x4)
-        points torch tensor of of shape (N, 2): sequence of points' coordinates
-        confidences None or torch tensor of shape (N,): confidences of points [0.0, 1.0].
+        proj_matricies torch tensor of shape (B, N, 3, 4): sequence of projection matricies (3x4)
+        points torch tensor of of shape (B, N, J, 2): sequence of points' coordinates
+        confidences None or torch tensor of shape (B, N, J): confidences of points [0.0, 1.0].
                                                         If None, all confidences are supposed to be 1.0
     Returns:
-        point_3d numpy torch tensor of shape (3,): triangulated point
+        point_3d numpy torch tensor of shape (B, J, 3): triangulated point
     """
-    assert len(proj_matricies) == len(points)
+    assert proj_matricies.shape[1] == points.shape[1]
 
-    n_views = len(proj_matricies)
+    n_batch = points.shape[0]
+    n_views = points.shape[1]
+    n_joints = points.shape[2]
+    n_coord = points.shape[3]
 
-    if confidences is None:
-        confidences = torch.ones(n_views, dtype=torch.float32, device=points.device)
+    # Transpose to properly triangulate (take all views).
+    points = points.transpose(1, 2).reshape(-1, n_views, n_coord, 1)
+    confidences = confidences.transpose(1, 2).reshape(-1, n_views, 1, 1)
 
-    A = proj_matricies[:, 2:3].expand(n_views, 2, 4) * points.view(n_views, 2, 1)
-    A -= proj_matricies[:, :2]
-    A *= confidences.view(-1, 1, 1)
+    A = proj_matricies[:, :, 2:3].expand(n_batch, n_views, 2, 4).repeat(n_joints, 1, 1, 1) * points
+    A -= proj_matricies[:, :, :2].repeat(n_joints, 1, 1, 1)
+    A *= confidences.view(-1, n_views, 1, 1)
 
-    u, s, vh = torch.svd(A.view(-1, 4))
+    u, s, vh = torch.svd(A.reshape(-1, n_views * n_coord, 4))
 
-    point_3d_homo = -vh[:, 3]
-    point_3d = homogeneous_to_euclidean(point_3d_homo.unsqueeze(0))[0]
+    point_3d_homo = -vh[:, :, 3]
+    point_3d = homogeneous_to_euclidean(point_3d_homo).reshape(n_batch, n_joints, n_coord + 1)
 
     return point_3d
 
@@ -180,15 +185,13 @@ def triangulate_batch_of_points(proj_matricies_batch, points_batch, confidences_
 
     points_3d_batch = torch.zeros(batch_size, n_view_comb, n_joints, 3, dtype=torch.float32, device=points_batch.device)
 
-    for batch_i in range(batch_size):
-        for joint_i in range(n_joints):
-            for comb_i, v_comb in enumerate(view_combinations):
-                points = points_batch[batch_i, v_comb, joint_i, :]
-                proj_matricies = proj_matricies_batch[batch_i, v_comb]
-                confidences = confidences_batch[batch_i, v_comb, joint_i] if confidences_batch is not None else None
+    for comb_i, v_comb in enumerate(view_combinations):
+        points = points_batch[:, v_comb, :, :]
+        proj_matricies = proj_matricies_batch[:, v_comb]
+        confidences = confidences_batch[:, v_comb, :] if confidences_batch is not None else None
 
-                point_3d = triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, confidences=confidences)
-                points_3d_batch[batch_i, comb_i, joint_i] = point_3d
+        points_3d = triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, confidences=confidences)
+        points_3d_batch[:, comb_i] = points_3d
 
     return points_3d_batch
 
