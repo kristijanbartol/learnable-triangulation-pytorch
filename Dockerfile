@@ -53,6 +53,7 @@ RUN python3.7 -m pip install \
 	scipy==1.3.1 \
 	six==1.12.0 \
 	tensorboard \
-	h5py==2.10.0
+	h5py==2.10.0 \
+	poseval@git+https://github.com/svenkreiss/poseval.git
 RUN python3.7 -m pip install --no-cache-dir -e .
 WORKDIR /learnable-triangulation

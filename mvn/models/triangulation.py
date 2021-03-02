@@ -13,6 +13,10 @@ from mvn.utils import op, multiview, img, misc, volumetric
 from mvn.models import pose_resnet
 from mvn.models.v2v import V2VModel
 
+from mmcv import Config
+
+import mmpose.models.builder as pose_builder
+
 
 class RANSACTriangulationNet(nn.Module):
     def __init__(self, config, device='cuda:0'):
@@ -134,16 +138,13 @@ class AlgebraicTriangulationNet(nn.Module):
 
         self.use_confidences = config.model.use_confidences
 
-        for model_i in config.model.backbone:
-            config.model.backbone[model_i].alg_confidences = False
-            config.model.backbone[model_i].vol_confidences = False
-
-        if self.use_confidences:
-            config.model.backbone.resnet.alg_confidences = True
+        if config.model.use_default_backbone:
+            self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
+        else:
+            backbone_config = Config.fromfile('./configs/hrnet.py')
+            self.backbone = pose_builder.build_posenet(backbone_config.model)
 
         self.use_view_comb_triang = config.opt.use_view_comb_triang
-
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone.resnet, device=device)
 
         self.heatmap_softmax = config.model.heatmap_softmax
         self.heatmap_multiplier = config.model.heatmap_multiplier
