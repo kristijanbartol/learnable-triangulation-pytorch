@@ -9,27 +9,37 @@ def expand_tensor(t, n_view_comb):
 
 
 class KeypointsMSELoss(nn.Module):
-    def __init__(self):
+    def __init__(self, use_view_comb_triang=True):
         super().__init__()
+
+        self.use_view_comb_triang = use_view_comb_triang
 
     def forward(self, keypoints_pred, keypoints_gt, keypoints_binary_validity):
         dimension = keypoints_pred.shape[-1]
+        if self.use_view_comb_triang:
+            # Expand GT to evaluate all 3D pose predictions.
+            n_view_comb = keypoints_pred.shape[1]
+            keypoints_gt = expand_tensor(keypoints_gt, n_view_comb)
+            keypoints_binary_validity = expand_tensor(keypoints_binary_validity, n_view_comb)
+
         loss = torch.sum((keypoints_gt - keypoints_pred) ** 2 * keypoints_binary_validity)
         loss = loss / (dimension * max(1, torch.sum(keypoints_binary_validity).item()))
         return loss
 
 class KeypointsMSESmoothLoss(nn.Module):
-    def __init__(self, threshold=400):
+    def __init__(self, use_view_comb_triang=True, threshold=400):
         super().__init__()
 
+        self.use_view_comb_triang = use_view_comb_triang
         self.threshold = threshold
 
     def forward(self, keypoints_pred, keypoints_gt, keypoints_binary_validity):
         dimension = keypoints_pred.shape[-1]
-        # Expand GT to evaluate all 3D pose predictions.
-        n_view_comb = keypoints_pred.shape[1]
-        keypoints_gt = expand_tensor(keypoints_gt, n_view_comb)
-        keypoints_binary_validity = expand_tensor(keypoints_binary_validity, n_view_comb)
+        if self.use_view_comb_triang:
+            # Expand GT to evaluate all 3D pose predictions.
+            n_view_comb = keypoints_pred.shape[1]
+            keypoints_gt = expand_tensor(keypoints_gt, n_view_comb)
+            keypoints_binary_validity = expand_tensor(keypoints_binary_validity, n_view_comb)
 
         diff = (keypoints_gt - keypoints_pred) ** 2 * keypoints_binary_validity
         diff[diff > self.threshold] = torch.pow(diff[diff > self.threshold], 0.1) * (self.threshold ** 0.9)
@@ -38,25 +48,36 @@ class KeypointsMSESmoothLoss(nn.Module):
 
 
 class KeypointsMAELoss(nn.Module):
-    def __init__(self):
+    def __init__(self, use_view_comb_triang=True):
         super().__init__()
+
+        self.use_view_comb_triang = use_view_comb_triang
 
     def forward(self, keypoints_pred, keypoints_gt, keypoints_binary_validity):
         dimension = keypoints_pred.shape[-1]
+        if self.use_view_comb_triang:
+            # Expand GT to evaluate all 3D pose predictions.
+            n_view_comb = keypoints_pred.shape[1]
+            keypoints_gt = expand_tensor(keypoints_gt, n_view_comb)
+            keypoints_binary_validity = expand_tensor(keypoints_binary_validity, n_view_comb)
+
         loss = torch.sum(torch.abs(keypoints_gt - keypoints_pred) * keypoints_binary_validity)
         loss = loss / (dimension * max(1, torch.sum(keypoints_binary_validity).item()))
         return loss
 
 
 class KeypointsL2Loss(nn.Module):
-    def __init__(self):
+    def __init__(self, use_view_comb_triang=True):
         super().__init__()
 
+        self.use_view_comb_triang = use_view_comb_triang
+
     def forward(self, keypoints_pred, keypoints_gt, keypoints_binary_validity):
-        # Expand GT to evaluate all 3D pose predictions.
-        n_view_comb = keypoints_pred.shape[1]
-        keypoints_gt = expand_tensor(keypoints_gt, n_view_comb)
-        keypoints_binary_validity = expand_tensor(keypoints_binary_validity, n_view_comb)
+        if self.use_view_comb_triang:
+            # Expand GT to evaluate all 3D pose predictions.
+            n_view_comb = keypoints_pred.shape[1]
+            keypoints_gt = expand_tensor(keypoints_gt, n_view_comb)
+            keypoints_binary_validity = expand_tensor(keypoints_binary_validity, n_view_comb)
 
         loss = torch.sum(torch.sqrt(torch.sum((keypoints_gt - keypoints_pred) ** 2 * keypoints_binary_validity, dim=2)))
         loss = loss / max(1, torch.sum(keypoints_binary_validity).item())

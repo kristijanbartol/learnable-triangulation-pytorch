@@ -140,6 +140,8 @@ class AlgebraicTriangulationNet(nn.Module):
         if self.use_confidences:
             config.model.backbone.alg_confidences = True
 
+        self.use_view_comb_triang = config.opt.use_view_comb_triang
+
         self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
 
         self.heatmap_softmax = config.model.heatmap_softmax
@@ -187,7 +189,8 @@ class AlgebraicTriangulationNet(nn.Module):
         try:
             poses_3d = multiview.triangulate_batch_of_points(
                 proj_matricies, keypoints_2d,
-                confidences_batch=alg_confidences
+                confidences_batch=alg_confidences,
+                use_view_comb_triang=self.use_view_comb_triang
             )
         except RuntimeError as e:
             print("Error: ", e)

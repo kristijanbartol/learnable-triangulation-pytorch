@@ -174,24 +174,34 @@ def triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, c
     return point_3d
 
 
-def triangulate_batch_of_points(proj_matricies_batch, points_batch, confidences_batch=None):
+def triangulate_batch_of_points(proj_matricies_batch, points_batch, confidences_batch=None, use_view_comb_triang=True):
     batch_size, n_views, n_joints = points_batch.shape[:3]
 
-    # Generate view [0, 1, ..., n_views] combinations for subsets of length [2, ..., n_views].
-    view_combinations = [itertools.combinations(range(n_views), x) for x in range(2, n_views + 1)]
-    # Merge sublists
-    view_combinations = [j for i in view_combinations for j in i]
-    n_view_comb = len(view_combinations)
+    start_time = time.time()
+    if use_view_comb_triang:
+        # Generate view [0, 1, ..., n_views] combinations for subsets of length [2, ..., n_views].
+        view_combinations = [itertools.combinations(range(n_views), x) for x in range(2, n_views + 1)]
+        # Merge sublists
+        view_combinations = [j for i in view_combinations for j in i]
+        n_view_comb = len(view_combinations)
 
-    points_3d_batch = torch.zeros(batch_size, n_view_comb, n_joints, 3, dtype=torch.float32, device=points_batch.device)
+        points_3d_batch = torch.zeros(batch_size, n_view_comb, n_joints, 3, dtype=torch.float32, device=points_batch.device)
 
-    for comb_i, v_comb in enumerate(view_combinations):
-        points = points_batch[:, v_comb, :, :]
-        proj_matricies = proj_matricies_batch[:, v_comb]
-        confidences = confidences_batch[:, v_comb, :] if confidences_batch is not None else None
+        for comb_i, v_comb in enumerate(view_combinations):
+            points = points_batch[:, v_comb, :, :]
+            proj_matricies = proj_matricies_batch[:, v_comb]
+            confidences = confidences_batch[:, v_comb, :] if confidences_batch is not None else None
 
-        points_3d = triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, confidences=confidences)
-        points_3d_batch[:, comb_i] = points_3d
+            points_3d = triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, confidences=confidences)
+            points_3d_batch[:, comb_i] = points_3d
+
+    else:
+        confidences = confidences_batch if confidences_batch is not None else None
+        #points_3d_batch = torch.zeros(batch_size, n_joints, 3, dtype=torch.float32, device=points_batch.device)
+        points_3d_batch = triangulate_point_from_multiple_views_linear_torch(proj_matricies_batch, points_batch, confidences=confidences)
+        #points_3d_batch = points_3d
+    
+    print(f'triangulation: {time.time() - start_time}')
 
     return points_3d_batch
 

@@ -151,7 +151,8 @@ def setup_experiment(config, model_name, is_train=True):
     return experiment_dir, writer
 
 
-def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_total=0, is_train=True, caption='', master=False, experiment_dir=None, writer=None):
+def one_epoch(model, criterion, metrics_criterion, opt, config, dataloader, device, epoch, n_iters_total=0, 
+        is_train=True, caption='', master=False, experiment_dir=None, writer=None, use_view_comb_triang=True):
     name = "train" if is_train else "val"
     model_type = config.model.name
 
@@ -192,8 +193,11 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
 
                 batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[3:])
 
-                # dims(keypoints_3d_pred) = (batch, n_view_comb, n_joints)
-                n_joints = keypoints_3d_pred.shape[2]
+                if use_view_comb_triang:
+                    # dims(keypoints_3d_pred) = (batch, n_view_comb, n_joints)
+                    n_joints = keypoints_3d_pred.shape[2]
+                else:
+                    n_joints = keypoints_3d_pred.shape[1]
 
                 keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
 
@@ -211,7 +215,11 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                     keypoints_3d_gt = keypoints_3d_gt_transformed
 
                     keypoints_3d_pred_transformed = keypoints_3d_pred.clone()
-                    keypoints_3d_pred_transformed[:, :, torch.arange(n_joints) != base_joint] -= keypoints_3d_pred_transformed[:, :, base_joint:base_joint + 1]
+                    if use_view_comb_triang:
+                        keypoints_3d_pred_transformed[:, :, torch.arange(n_joints) != base_joint] -= keypoints_3d_pred_transformed[:, :, base_joint:base_joint + 1]
+                    else:
+                        keypoints_3d_pred_transformed[:, torch.arange(n_joints) != base_joint] -= keypoints_3d_pred_transformed[:, base_joint:base_joint + 1]
+
                     keypoints_3d_pred = keypoints_3d_pred_transformed
 
                 # calculate loss
@@ -245,7 +253,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                     opt.step()
 
                 # calculate metrics
-                l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
+                l2 = metrics_criterion(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
                 metric_dict['l2'].append(l2.item())
 
                 # base point l2
@@ -284,7 +292,8 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                                 cuboids_batch=cuboids_pred,
                                 confidences_batch=confidences_pred,
                                 batch_index=batch_i, size=5,
-                                max_n_cols=10
+                                max_n_cols=10,
+                                use_view_comb_triang=use_view_comb_triang
                             )
                             writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
@@ -422,9 +431,11 @@ def main(args):
     }[config.opt.criterion]
 
     if config.opt.criterion == "MSESmooth":
-        criterion = criterion_class(config.opt.mse_smooth_threshold)
+        criterion = criterion_class(config.opt.use_view_comb_triang, config.opt.mse_smooth_threshold)
     else:
-        criterion = criterion_class()
+        criterion = criterion_class(config.opt.use_view_comb_triang)
+
+    metrics_criterion = KeypointsL2Loss(config.opt.use_view_comb_triang)
 
     # optimizer
     opt = None
@@ -461,8 +472,12 @@ def main(args):
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
 
-            n_iters_total_train = one_epoch(model, criterion, opt, config, train_dataloader, device, epoch, n_iters_total=n_iters_total_train, is_train=True, master=master, experiment_dir=experiment_dir, writer=writer)
-            n_iters_total_val = one_epoch(model, criterion, opt, config, val_dataloader, device, epoch, n_iters_total=n_iters_total_val, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer)
+            n_iters_total_train = one_epoch(model, criterion, metrics_criterion, opt, config, train_dataloader, device, 
+                epoch, n_iters_total=n_iters_total_train, is_train=True, master=master, experiment_dir=experiment_dir, writer=writer,
+                use_view_comb_triang=config.opt.use_view_comb_triang)
+            n_iters_total_val = one_epoch(model, criterion, metrics_criterion, opt, config, val_dataloader, device, 
+                epoch, n_iters_total=n_iters_total_val, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer,
+                use_view_comb_triang=config.opt.use_view_comb_triang)
 
             if master:
                 checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
