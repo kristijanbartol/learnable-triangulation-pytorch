@@ -34,14 +34,18 @@ model:
   heatmap_softmax: true
 
   backbone:
-    name: "resnet152"
-    style: "simple"
+    resnet:
+      name: "resnet152"
+      style: "simple"
 
-    init_weights: true
-    checkpoint: "./data/pretrained/human36m/pose_resnet_4.5_pixels_human36m.pth"
+      init_weights: true
+      checkpoint: "./data/pretrained/human36m/pose_resnet_4.5_pixels_human36m.pth"
 
-    num_joints: 17
-    num_layers: 152
+      num_joints: 17
+      num_layers: 152
+
+    hrnet:
+      name: "hrnet48"
 
 dataset:
   kind: "human36m"

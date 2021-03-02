@@ -134,15 +134,16 @@ class AlgebraicTriangulationNet(nn.Module):
 
         self.use_confidences = config.model.use_confidences
 
-        config.model.backbone.alg_confidences = False
-        config.model.backbone.vol_confidences = False
+        for model_i in config.model.backbone:
+            config.model.backbone[model_i].alg_confidences = False
+            config.model.backbone[model_i].vol_confidences = False
 
         if self.use_confidences:
-            config.model.backbone.alg_confidences = True
+            config.model.backbone.resnet.alg_confidences = True
 
         self.use_view_comb_triang = config.opt.use_view_comb_triang
 
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
+        self.backbone = pose_resnet.get_pose_net(config.model.backbone.resnet, device=device)
 
         self.heatmap_softmax = config.model.heatmap_softmax
         self.heatmap_multiplier = config.model.heatmap_multiplier
