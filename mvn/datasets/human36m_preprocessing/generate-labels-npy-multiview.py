@@ -188,16 +188,20 @@ for subject_idx, subject in enumerate(retval['subject_names']):
         table_segment['keypoints'] = poses_world
         table_segment['bbox_by_camera_tlbr'] = 0 # let a (0,0,0,0) bbox mean that this view is missing
 
+        missing = False
         for (camera_idx, camera) in enumerate(retval['camera_names']):
             camera_path = os.path.join(action_path, camera)
             if not os.path.isdir(camera_path):
                 print('Warning: camera %s isn\'t present in %s/%s' % (camera, subject, action))
+                missing = True
                 continue
             
-            for bbox, frame_idx in zip(table_segment['bbox_by_camera_tlbr'], frame_idxs):
-                bbox[camera_idx] = bboxes[subject][action][camera][frame_idx]
+            if not missing:
+                for bbox, frame_idx in zip(table_segment['bbox_by_camera_tlbr'], frame_idxs):
+                    bbox[camera_idx] = bboxes[subject][action][camera][frame_idx]
 
-        retval['table'].append(table_segment)
+        if not missing:
+            retval['table'].append(table_segment)
 
 retval['table'] = np.concatenate(retval['table'])
 assert retval['table'].ndim == 1
