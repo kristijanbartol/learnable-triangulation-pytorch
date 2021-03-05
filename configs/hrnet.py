@@ -4,6 +4,7 @@ resume_from = None
 dist_params = dict(backend='nccl')
 workflow = [('train', 1)]
 checkpoint_config = dict(interval=10)
+checkpoint_path = './models/backbone/hrnet/hrnet_w48-8ef0771d.pth'
 evaluation = dict(interval=10, metric='mAP', key_indicator='AP')
 
 optimizer = dict(

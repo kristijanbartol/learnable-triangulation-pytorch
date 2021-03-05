@@ -141,8 +141,7 @@ class AlgebraicTriangulationNet(nn.Module):
         if config.model.use_default_backbone:
             self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
         else:
-            backbone_config = Config.fromfile('./configs/hrnet.py')
-            self.backbone = pose_builder.build_posenet(backbone_config.model)
+            self.backbone = pose_hrnet.get_pose_net(device=device)
 
         self.use_view_comb_triang = config.opt.use_view_comb_triang
 

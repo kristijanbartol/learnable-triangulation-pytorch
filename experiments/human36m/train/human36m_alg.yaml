@@ -33,7 +33,7 @@ model:
   heatmap_multiplier: 100.0
   heatmap_softmax: true
 
-  use_default_backbone: true
+  use_default_backbone: false
   backbone:
     name: "resnet152"
     style: "simple"
@@ -48,7 +48,7 @@ model:
     alg_confidences: true
     vol_confidences: false
 
-    channelwise_weights: false
+    channelwise_weights: true
 
 dataset:
   kind: "human36m"

@@ -107,5 +107,5 @@ venv.bak/
 data/
 
 # Generated
-logs/
-models
+logs/*
+models/*
