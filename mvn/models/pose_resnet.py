@@ -182,7 +182,11 @@ resnet_spec = {18: (BasicBlock, [2, 2, 2, 2]),
 
 
 class PoseResNet(nn.Module):
-    def __init__(self, block, layers, num_joints, num_views,
+    def __init__(self, block, 
+                 layers, 
+                 num_joints, 
+                 num_views,
+                 batch_size,
                  num_input_channels=3,
                  deconv_with_bias=False,
                  num_deconv_layers=3,
@@ -195,8 +199,9 @@ class PoseResNet(nn.Module):
                  ):
         super().__init__()
 
-        self.num_views = num_views
         self.num_joints = num_joints
+        self.num_views = num_views
+        self.batch_size = batch_size
         self.num_input_channels = num_input_channels
         self.inplanes = 64
 
@@ -311,11 +316,11 @@ class PoseResNet(nn.Module):
         alg_confidences = None
         if hasattr(self, "alg_confidences"):
             if self.channelwise_weights:
-                x = x.reshape((2, -1, x.shape[2], x.shape[3]))
+                x = x.reshape((self.batch_size, -1, x.shape[2], x.shape[3]))
             alg_confidences = self.alg_confidences(x)
             if self.channelwise_weights:
-                x = x.reshape((2 * self.num_views, -1, x.shape[2], x.shape[3]))
-                alg_confidences = alg_confidences.reshape((2 * self.num_views, -1))
+                x = x.reshape((self.batch_size * self.num_views, -1, x.shape[2], x.shape[3]))
+                alg_confidences = alg_confidences.reshape((self.batch_size * self.num_views, -1))
 
         vol_confidences = None
         if hasattr(self, "vol_confidences"):
@@ -330,13 +335,17 @@ class PoseResNet(nn.Module):
         return heatmaps, features, alg_confidences, vol_confidences
 
 
-def get_pose_net(config, device='cuda:0'):
+def get_pose_net(config, batch_size, device='cuda:0'):
     block_class, layers = resnet_spec[config.num_layers]
     if config.style == 'caffe':
         block_class = Bottleneck_CAFFE
 
     model = PoseResNet(
-        block_class, layers, config.num_joints, config.num_views,
+        block_class, 
+        layers, 
+        config.num_joints, 
+        config.num_views,
+        batch_size,
         num_input_channels=3,
         deconv_with_bias=False,
         num_deconv_layers=3,

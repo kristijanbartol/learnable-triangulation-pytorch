@@ -139,7 +139,8 @@ class AlgebraicTriangulationNet(nn.Module):
         self.use_confidences = config.model.use_confidences
 
         if config.model.use_default_backbone:
-            self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
+            self.backbone = pose_resnet.get_pose_net(
+                    config.model.backbone, config.opt.batch_size, device=device)
         else:
             self.backbone = pose_hrnet.get_pose_net(device=device)
 
@@ -234,7 +235,8 @@ class VolumetricTriangulationNet(nn.Module):
         if self.volume_aggregation_method.startswith('conf'):
             config.model.backbone.vol_confidences = True
 
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
+        self.backbone = pose_resnet.get_pose_net(
+                config.model.backbone, config.opt.batch_size, device=device)
 
         for p in self.backbone.final_layer.parameters():
             p.requires_grad = False

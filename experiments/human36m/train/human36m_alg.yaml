@@ -14,7 +14,6 @@ opt:
 
   use_view_comb_triang: false
 
-  #  batch_size: 8
   batch_size: 2
   #val_batch_size: 16
   val_batch_size: 2
@@ -33,7 +32,7 @@ model:
   heatmap_multiplier: 100.0
   heatmap_softmax: true
 
-  use_default_backbone: false
+  use_default_backbone: true
   backbone:
     name: "resnet152"
     style: "simple"
