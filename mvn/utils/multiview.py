@@ -177,7 +177,6 @@ def triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, c
 def triangulate_batch_of_points(proj_matricies_batch, points_batch, confidences_batch=None, use_view_comb_triang=True):
     batch_size, n_views, n_joints = points_batch.shape[:3]
 
-    start_time = time.time()
     if use_view_comb_triang:
         # Generate view [0, 1, ..., n_views] combinations for subsets of length [2, ..., n_views].
         view_combinations = [itertools.combinations(range(n_views), x) for x in range(2, n_views + 1)]
@@ -197,11 +196,7 @@ def triangulate_batch_of_points(proj_matricies_batch, points_batch, confidences_
 
     else:
         confidences = confidences_batch if confidences_batch is not None else None
-        #points_3d_batch = torch.zeros(batch_size, n_joints, 3, dtype=torch.float32, device=points_batch.device)
         points_3d_batch = triangulate_point_from_multiple_views_linear_torch(proj_matricies_batch, points_batch, confidences=confidences)
-        #points_3d_batch = points_3d
-    
-    print(f'triangulation: {time.time() - start_time}')
 
     return points_3d_batch
 
