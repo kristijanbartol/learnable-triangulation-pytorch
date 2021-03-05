@@ -12,7 +12,7 @@ opt:
   n_objects_per_epoch: 15000
   n_epochs: 9999
 
-  use_view_comb_triang: true
+  use_view_comb_triang: false
 
   #  batch_size: 8
   batch_size: 2
@@ -33,7 +33,7 @@ model:
   heatmap_multiplier: 100.0
   heatmap_softmax: true
 
-  use_default_backbone: false
+  use_default_backbone: true
   backbone:
     name: "resnet152"
     style: "simple"
@@ -41,11 +41,14 @@ model:
     init_weights: true
     checkpoint: "./data/pretrained/human36m/pose_resnet_4.5_pixels_human36m.pth"
 
+    num_views: 4
     num_joints: 17
     num_layers: 152
 
     alg_confidences: true
     vol_confidences: false
+
+    channelwise_weights: false
 
 dataset:
   kind: "human36m"

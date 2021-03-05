@@ -182,7 +182,7 @@ resnet_spec = {18: (BasicBlock, [2, 2, 2, 2]),
 
 
 class PoseResNet(nn.Module):
-    def __init__(self, block, layers, num_joints,
+    def __init__(self, block, layers, num_joints, num_views,
                  num_input_channels=3,
                  deconv_with_bias=False,
                  num_deconv_layers=3,
@@ -190,10 +190,12 @@ class PoseResNet(nn.Module):
                  num_deconv_kernels=(4, 4, 4),
                  final_conv_kernel=1,
                  alg_confidences=False,
-                 vol_confidences=False
+                 vol_confidences=False,
+                 channelwise_weights=False
                  ):
         super().__init__()
 
+        self.num_views = num_views
         self.num_joints = num_joints
         self.num_input_channels = num_input_channels
         self.inplanes = 64
@@ -212,8 +214,13 @@ class PoseResNet(nn.Module):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
 
+        self.channelwise_weights = channelwise_weights
+
         if alg_confidences:
-            self.alg_confidences = GlobalAveragePoolingHead(512 * block.expansion, num_joints)
+            if channelwise_weights:
+                self.alg_confidences = GlobalAveragePoolingHead(512 * block.expansion * num_views, num_joints * num_views)
+            else:
+                self.alg_confidences = GlobalAveragePoolingHead(512 * block.expansion, num_joints)
 
         if vol_confidences:
             self.vol_confidences = GlobalAveragePoolingHead(512 * block.expansion, 32)
@@ -303,7 +310,12 @@ class PoseResNet(nn.Module):
 
         alg_confidences = None
         if hasattr(self, "alg_confidences"):
+            if self.channelwise_weights:
+                x = x.reshape((2, -1, x.shape[2], x.shape[3]))
             alg_confidences = self.alg_confidences(x)
+            if self.channelwise_weights:
+                x = x.reshape((2 * self.num_views, -1, x.shape[2], x.shape[3]))
+                alg_confidences = alg_confidences.reshape((2 * self.num_views, -1))
 
         vol_confidences = None
         if hasattr(self, "vol_confidences"):
@@ -324,7 +336,7 @@ def get_pose_net(config, device='cuda:0'):
         block_class = Bottleneck_CAFFE
 
     model = PoseResNet(
-        block_class, layers, config.num_joints,
+        block_class, layers, config.num_joints, config.num_views,
         num_input_channels=3,
         deconv_with_bias=False,
         num_deconv_layers=3,
@@ -332,7 +344,8 @@ def get_pose_net(config, device='cuda:0'):
         num_deconv_kernels=(4, 4, 4),
         final_conv_kernel=1,
         alg_confidences=config.alg_confidences,
-        vol_confidences=config.vol_confidences
+        vol_confidences=config.vol_confidences,
+        channelwise_weights=config.channelwise_weights
     )
 
     if config.init_weights:
