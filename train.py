@@ -366,6 +366,8 @@ def one_epoch(model, criterion, metrics_criterion, opt, config, dataloader, devi
         # dump to tensorboard per-epoch stats
         for title, value in metric_dict.items():
             writer.add_scalar(f"{name}/{title}_epoch", np.mean(value), epoch)
+            
+        writer.flush()
 
     return n_iters_total
 
