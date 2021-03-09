@@ -344,6 +344,7 @@ def one_epoch(model, criterion, metrics_criterion, opt, config, dataloader, devi
                 writer.add_scalar(f"{name}/n_views", n_views, n_iters_total)
 
                 n_iters_total += 1
+                writer.flush()
 
     # calculate evaluation metrics
     if master:
