@@ -144,8 +144,6 @@ class AlgebraicTriangulationNet(nn.Module):
         else:
             self.backbone = pose_hrnet.get_pose_net(device=device)
 
-        self.use_view_comb_triang = config.opt.use_view_comb_triang
-
         self.heatmap_softmax = config.model.heatmap_softmax
         self.heatmap_multiplier = config.model.heatmap_multiplier
 
@@ -191,8 +189,7 @@ class AlgebraicTriangulationNet(nn.Module):
         try:
             poses_3d = multiview.triangulate_batch_of_points(
                 proj_matricies, keypoints_2d,
-                confidences_batch=alg_confidences,
-                use_view_comb_triang=self.use_view_comb_triang
+                confidences_batch=alg_confidences
             )
         except RuntimeError as e:
             print("Error: ", e)

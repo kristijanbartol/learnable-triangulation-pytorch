@@ -12,8 +12,6 @@ opt:
   n_objects_per_epoch: 15000
   n_epochs: 9999
 
-  use_view_comb_triang: false
-
   batch_size: 2
   #val_batch_size: 16
   val_batch_size: 2

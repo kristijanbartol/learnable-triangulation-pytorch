@@ -88,8 +88,7 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
                     confidences_batch=None,
                     batch_index=0, size=5,
                     max_n_cols=10,
-                    pred_kind=None,
-                    use_view_comb_triang=True,
+                    pred_kind=None
                     ):
     if pred_kind is None:
         pred_kind = kind
@@ -142,10 +141,6 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
 
     # 2D keypoints (pred projected)
     axes[row_i, 0].set_ylabel("2d keypoints (pred projected)", size='large')
-
-    if use_view_comb_triang:
-        # TODO (kristijan): Visualize 3D keypoints for all view combinations. For now, visualize N-view only.
-        keypoints_3d_batch_pred = keypoints_3d_batch_pred[:, -1, :, :]
     
     for view_i in range(n_cols):
         axes[row_i][view_i].imshow(images[view_i])
