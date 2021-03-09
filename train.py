@@ -218,7 +218,8 @@ def one_epoch(model, criterion, metrics_criterion, opt, config, dataloader, devi
 
             # calculate loss
             total_loss = 0.0
-            loss = criterion(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
+            loss = criterion(keypoints_3d_pred * scale_keypoints_3d, confidences_pred, keypoints_3d_gt * scale_keypoints_3d, 
+                keypoints_3d_binary_validity_gt)
             total_loss += loss
             metric_dict[f'{config.opt.criterion}'].append(loss.item())
 
@@ -366,7 +367,7 @@ def one_epoch(model, criterion, metrics_criterion, opt, config, dataloader, devi
         # dump to tensorboard per-epoch stats
         for title, value in metric_dict.items():
             writer.add_scalar(f"{name}/{title}_epoch", np.mean(value), epoch)
-            
+
         writer.flush()
 
     return n_iters_total
