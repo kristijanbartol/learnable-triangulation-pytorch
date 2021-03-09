@@ -151,6 +151,7 @@ def triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, c
     Returns:
         point_3d numpy torch tensor of shape (B, J, 3): triangulated point
     """
+    '''
     assert proj_matricies.shape[1] == points.shape[1]
 
     n_batch = points.shape[0]
@@ -170,6 +171,24 @@ def triangulate_point_from_multiple_views_linear_torch(proj_matricies, points, c
 
     point_3d_homo = -vh[:, :, 3]
     point_3d = homogeneous_to_euclidean(point_3d_homo).reshape(n_batch, n_joints, n_coord + 1)
+
+    return point_3d
+    '''
+    assert len(proj_matricies) == len(points)
+
+    n_views = len(proj_matricies)
+
+    if confidences is None:
+        confidences = torch.ones(n_views, dtype=torch.float32, device=points.device)
+
+    A = proj_matricies[:, 2:3].expand(n_views, 2, 4) * points.view(n_views, 2, 1)
+    A -= proj_matricies[:, :2]
+    A *= confidences.view(-1, 1, 1)
+
+    u, s, vh = torch.svd(A.view(-1, 4))
+
+    point_3d_homo = -vh[:, 3]
+    point_3d = homogeneous_to_euclidean(point_3d_homo.unsqueeze(0))[0]
 
     return point_3d
 
@@ -195,8 +214,22 @@ def triangulate_batch_of_points(proj_matricies_batch, points_batch, confidences_
             points_3d_batch[:, comb_i] = points_3d
 
     else:
+        '''
         confidences = confidences_batch if confidences_batch is not None else None
         points_3d_batch = triangulate_point_from_multiple_views_linear_torch(proj_matricies_batch, points_batch, confidences=confidences)
+        '''
+        batch_size, n_views, n_joints = points_batch.shape[:3]
+        point_3d_batch = torch.zeros(batch_size, n_joints, 3, dtype=torch.float32, device=points_batch.device)
+
+        for batch_i in range(batch_size):
+            for joint_i in range(n_joints):
+                points = points_batch[batch_i, :, joint_i, :]
+
+                confidences = confidences_batch[batch_i, :, joint_i] if confidences_batch is not None else None
+                point_3d = triangulate_point_from_multiple_views_linear_torch(proj_matricies_batch[batch_i], points, confidences=confidences)
+                point_3d_batch[batch_i, joint_i] = point_3d
+
+        return point_3d_batch
 
     return points_3d_batch
 
