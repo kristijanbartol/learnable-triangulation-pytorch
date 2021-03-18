@@ -13,6 +13,8 @@ from mvn.utils import op, multiview, img, misc, volumetric
 from mvn.models import pose_resnet
 from mvn.models.v2v import V2VModel
 
+import kornia
+
 
 class RANSACTriangulationNet(nn.Module):
     def __init__(self, config, device='cuda:0'):
@@ -146,7 +148,7 @@ class AlgebraicTriangulationNet(nn.Module):
         self.heatmap_multiplier = config.model.heatmap_multiplier
 
 
-    def forward(self, images, proj_matricies, batch):
+    def forward(self, images, proj_matricies, intr_matricies, batch):
         device = images.device
         batch_size, n_views = images.shape[:2]
 
@@ -182,6 +184,38 @@ class AlgebraicTriangulationNet(nn.Module):
         keypoints_2d_transformed[:, :, :, 0] = keypoints_2d[:, :, :, 0] * (image_shape[1] / heatmap_shape[1])
         keypoints_2d_transformed[:, :, :, 1] = keypoints_2d[:, :, :, 1] * (image_shape[0] / heatmap_shape[0])
         keypoints_2d = keypoints_2d_transformed
+
+        def find_rotation_matrices(keypoints_2d, alg_confidences, intr_matricies):
+            points1 = keypoints_2d[:, 0]
+            points2 = keypoints_2d[:, 1]
+            K1 = intr_matricies[:, 0]
+            K2 = intr_matricies[:, 1]
+            # Take mean of the corresponding keypoints for the two views.
+            conf = ...
+            F = kornia.find_fundamental(points1, points2, torch.ones(keypoints_view1.shape[:2]))
+            E = kornia.essential_from_fundamental(F, K1, K2)
+            R1, R2, t = kornia.decompose_essential_matrix(E)
+
+            return R1, R2
+
+        def compare_rotations(proj_matrices, est_proj_matrices):
+            proj_mat1 = proj_matrices[:, 0]
+            proj_mat2 = proj_matrices[:, 1]
+            rel_rot = torch.inverse(proj_mat1) @ proj_mat2
+
+            rel_rot_quat = kornia.rotation_matrix_to_quaternion(rel_rot)
+            proj_mat1_quat = kornia.rotation_matrix_to_quaternion(est_proj_matrices[:, 0])
+            proj_mat2_quat = kornia.rotation_matrix_to_quaternion(est_proj_matrices[:, 1])
+
+            diff1 = proj_mat1_quat * torch.inverse(rel_rot_quat)
+            diff2 = proj_mat2_quat * torch.inverse(rel_rot_quat)
+
+            return min(diff1, diff2)
+
+        with torch.no_grad():
+            est_rot_matrices = find_rotation_matrices(keypoints_2d, alg_confidences, intr_matricies)
+            rot_similarity = compare_rotations(proj_matricies, est_rot_matrices)
+            print(rot_similarity)
 
         # triangulate
         try:
