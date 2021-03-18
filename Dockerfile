@@ -8,7 +8,7 @@ ENV TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0+PTX"
 ENV TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
 ENV CMAKE_PREFIX_PATH="$(dirname $(which conda))/../"
 
-#COPY . /learnable-triangulation/
+COPY . /learnable-triangulation/
 
 RUN apt-get update && apt-get install -y git \
 	ninja-build \
@@ -33,7 +33,7 @@ RUN python3.7 -m pip install cython xtcocotools
 #RUN git clone https://github.com/open-mmlab/mmpose.git /mmpose
 #WORKDIR /mmpose/
 #RUN mkdir -p /mmpose/data
-ENV FORCE_CUDA="1"
+#ENV FORCE_CUDA="1"
 RUN python3.7 -m pip install \
 	cycler==0.10.0 \
 	decorator==4.4.0 \
@@ -56,5 +56,5 @@ RUN python3.7 -m pip install \
 	kornia \
 	h5py==2.10.0 \
 	poseval@git+https://github.com/svenkreiss/poseval.git
-RUN python3.7 -m pip install --no-cache-dir -e .
+#RUN python3.7 -m pip install --no-cache-dir -e .
 WORKDIR /learnable-triangulation

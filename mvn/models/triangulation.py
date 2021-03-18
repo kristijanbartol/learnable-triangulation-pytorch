@@ -192,23 +192,25 @@ class AlgebraicTriangulationNet(nn.Module):
             K2 = intr_matricies[:, 1]
             # Take mean of the corresponding keypoints for the two views.
             conf = ...
-            F = kornia.find_fundamental(points1, points2, torch.ones(keypoints_view1.shape[:2]))
+            conf = torch.ones(points1.shape[:2], device=points1.device)
+            F = kornia.find_fundamental(points1, points2, conf)
             E = kornia.essential_from_fundamental(F, K1, K2)
             R1, R2, t = kornia.decompose_essential_matrix(E)
 
             return R1, R2
 
         def compare_rotations(proj_matrices, est_proj_matrices):
-            proj_mat1 = proj_matrices[:, 0]
-            proj_mat2 = proj_matrices[:, 1]
-            rel_rot = torch.inverse(proj_mat1) @ proj_mat2
+            rot_mat1 = proj_matrices[:, 0, :, :3]
+            rot_mat2 = proj_matrices[:, 1, :, :3]
+
+            rel_rot = torch.inverse(rot_mat1) @ rot_mat2
 
             rel_rot_quat = kornia.rotation_matrix_to_quaternion(rel_rot)
-            proj_mat1_quat = kornia.rotation_matrix_to_quaternion(est_proj_matrices[:, 0])
-            proj_mat2_quat = kornia.rotation_matrix_to_quaternion(est_proj_matrices[:, 1])
+            proj_mat1_quat = kornia.rotation_matrix_to_quaternion(est_proj_matrices[0])
+            proj_mat2_quat = kornia.rotation_matrix_to_quaternion(est_proj_matrices[1])
 
-            diff1 = proj_mat1_quat * torch.inverse(rel_rot_quat)
-            diff2 = proj_mat2_quat * torch.inverse(rel_rot_quat)
+            diff1 = torch.norm(proj_mat1_quat - rel_rot_quat)
+            diff2 = torch.norm(proj_mat2_quat - rel_rot_quat)
 
             return min(diff1, diff2)
 

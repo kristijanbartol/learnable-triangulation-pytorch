@@ -11,9 +11,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "data/human36m", 
-                "data/human36m/extra/una-dinosauria-data/h36m", 
-                "data/human36m/extra/bboxes-Human36M-GT.npy"
+                "--config", "experiments/human36m/train/human36m_alg.yaml", 
+                "--logdir", "./logs"
             ]
         }
     ]
