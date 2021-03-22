@@ -3,6 +3,7 @@ import torch
 import h5py
 import matplotlib.pyplot as plt
 from PIL import Image
+import time
 
 from mvn.utils.img import image_batch_to_numpy, to_numpy, denormalize_image, resize_image
 from mvn.utils.vis import draw_2d_pose
@@ -21,6 +22,8 @@ DEVICE='cuda'
 
 def find_rotation_matrices(points1, points2, K1, K2):
     conf = torch.ones(points1.shape[:2], device=points1.device)
+    conf[0][5] = 0.01
+    conf[0][:9] = 0.
     F = kornia.find_fundamental(points1, points2, conf)
     E = kornia.essential_from_fundamental(F, K1, K2)
     R1, R2, t = kornia.decompose_essential_matrix(E)
@@ -40,7 +43,7 @@ def compare_rotations(rot_mat1, rot_mat2, est_rot):
     diff1 = torch.norm(est_rot1_quat - rel_rot_quat)
     diff2 = torch.norm(est_rot2_quat - rel_rot_quat)
 
-    return min(diff1, diff2)
+    return min(diff1, diff2), np.argmin([diff1, diff2])
 
 
 if __name__ == '__main__':
@@ -60,6 +63,9 @@ if __name__ == '__main__':
     R1 = torch.tensor(camera1.R, device=DEVICE, dtype=torch.float32)
     R2 = torch.tensor(camera2.R, device=DEVICE, dtype=torch.float32)
 
+    t1 = torch.tensor(camera1.t, device=DEVICE, dtype=torch.float32)
+    t2 = torch.tensor(camera2.t, device=DEVICE, dtype=torch.float32)
+
     extr1 = torch.tensor(camera1.extrinsics, device=DEVICE, dtype=torch.float32)
     extr2 = torch.tensor(camera2.extrinsics, device=DEVICE, dtype=torch.float32)
 
@@ -69,10 +75,14 @@ if __name__ == '__main__':
     img1 = Image.open(IMG1_PATH)
     img2 = Image.open(IMG2_PATH)
 
-    fig, axs = plt.subplots(2)
+    fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(25, 25))
 
-    axs[0].imshow(img1)
-    axs[1].imshow(img2)
+    axs[0][0].imshow(img1)
+    axs[0][1].imshow(img2)
+    #axs[1][0].imshow(img1)
+    #axs[1][1].imshow(img2)
+    axs[1][0].imshow(img1)
+    axs[1][1].imshow(img2)
 
     X = torch.cat((X, torch.ones((X.shape[0], 1), device=DEVICE)), dim=1)
 
@@ -82,10 +92,13 @@ if __name__ == '__main__':
     uv2 = X @ torch.transpose(K2 @ extr2, 0, 1)
     uv2 = (uv2 / uv2[:, 2].reshape(uv2.shape[0], 1))[:, :2]
 
-    draw_2d_pose(uv1.cpu(), axs[0], kind='human36m')
-    draw_2d_pose(uv2.cpu(), axs[1], kind='human36m')
+    draw_2d_pose(uv1.cpu(), axs[0][0], kind='human36m')
+    draw_2d_pose(uv2.cpu(), axs[0][1], kind='human36m')
 
-    plt.savefig('fig.png')
+    uv1[5] += 15.
+
+    #draw_2d_pose(uv1.cpu(), axs[1][0], kind='human36m')
+    #draw_2d_pose(uv2.cpu(), axs[1][1], kind='human36m')
 
     with torch.no_grad():
         uv1 = torch.unsqueeze(uv1, dim=0)
@@ -94,6 +107,26 @@ if __name__ == '__main__':
         K1 = torch.unsqueeze(K1, dim=0)
         K2 = torch.unsqueeze(K2, dim=0)
 
+        start_time = time.time()
         R_est = find_rotation_matrices(uv1, uv2, K1, K2)
-        rot_similarity = compare_rotations(R1, R2, R_est)
+        rot_similarity, min_index = compare_rotations(R1, R2, R_est)
         print(rot_similarity)
+        print(f'estimation time: {time.time() - start_time}')
+
+    R1_est = R1
+    t1_est = t1
+    R2_est = R_est[min_index][0] @ R1
+    t2_est = t2
+
+    extr1_est = torch.cat((R1_est, t1_est), dim=1)
+    extr2_est = torch.cat((R2_est, t2_est), dim=1)
+
+    uv1 = X @ torch.transpose(K1[0] @ extr1_est, 0, 1)
+    uv1 = (uv1 / uv1[:, 2].reshape(uv1.shape[0], 1))[:, :2]
+    uv2 = X @ torch.transpose(K2[0] @ extr2_est, 0, 1)
+    uv2 = (uv2 / uv2[:, 2].reshape(uv2.shape[0], 1))[:, :2]
+    
+    draw_2d_pose(uv1.cpu(), axs[1][0], kind='human36m')
+    draw_2d_pose(uv2.cpu(), axs[1][1], kind='human36m')
+
+    plt.savefig('fig.png')
