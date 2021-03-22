@@ -19,6 +19,30 @@ LABELS_PATH = './data/human36m/extra/human36m-multiview-labels-GTbboxes.npy'
 DEVICE='cuda'
 
 
+def find_rotation_matrices(points1, points2, K1, K2):
+    conf = torch.ones(points1.shape[:2], device=points1.device)
+    F = kornia.find_fundamental(points1, points2, conf)
+    E = kornia.essential_from_fundamental(F, K1, K2)
+    R1, R2, t = kornia.decompose_essential_matrix(E)
+
+    return R1, R2
+
+
+def compare_rotations(rot_mat1, rot_mat2, est_rot):
+    rel_rot = rot_mat2 @ torch.inverse(rot_mat1)
+
+    rel_rot_quat = kornia.geometry.rotation_matrix_to_quaternion(rel_rot)
+    est_rot1_quat = kornia.geometry.rotation_matrix_to_quaternion(est_rot[0])
+    est_rot2_quat = kornia.geometry.rotation_matrix_to_quaternion(est_rot[1])
+
+    rot_mat2_quat = kornia.geometry.rotation_matrix_to_quaternion(rot_mat2)
+
+    diff1 = torch.norm(est_rot1_quat - rel_rot_quat)
+    diff2 = torch.norm(est_rot2_quat - rel_rot_quat)
+
+    return min(diff1, diff2)
+
+
 if __name__ == '__main__':
     labels = np.load(LABELS_PATH, allow_pickle=True).item()
     X = torch.tensor(labels['table']['keypoints'][0], device=DEVICE, dtype=torch.float32)
@@ -33,6 +57,15 @@ if __name__ == '__main__':
     P1 = torch.tensor(camera1.projection, device=DEVICE, dtype=torch.float32)
     P2 = torch.tensor(camera2.projection, device=DEVICE, dtype=torch.float32)
 
+    R1 = torch.tensor(camera1.R, device=DEVICE, dtype=torch.float32)
+    R2 = torch.tensor(camera2.R, device=DEVICE, dtype=torch.float32)
+
+    extr1 = torch.tensor(camera1.extrinsics, device=DEVICE, dtype=torch.float32)
+    extr2 = torch.tensor(camera2.extrinsics, device=DEVICE, dtype=torch.float32)
+
+    K1 = torch.tensor(camera1.K, device=DEVICE, dtype=torch.float32)
+    K2 = torch.tensor(camera2.K, device=DEVICE, dtype=torch.float32)
+
     img1 = Image.open(IMG1_PATH)
     img2 = Image.open(IMG2_PATH)
 
@@ -43,12 +76,24 @@ if __name__ == '__main__':
 
     X = torch.cat((X, torch.ones((X.shape[0], 1), device=DEVICE)), dim=1)
 
-    uv1 = X @ torch.transpose(P1, 0, 1)
+    # NOTE: Can also decompose extrinsics to R|t.
+    uv1 = X @ torch.transpose(K1 @ extr1, 0, 1)
     uv1 = (uv1 / uv1[:, 2].reshape(uv1.shape[0], 1))[:, :2]
-    uv2 = X @ torch.transpose(P2, 0, 1)
+    uv2 = X @ torch.transpose(K2 @ extr2, 0, 1)
     uv2 = (uv2 / uv2[:, 2].reshape(uv2.shape[0], 1))[:, :2]
 
     draw_2d_pose(uv1.cpu(), axs[0], kind='human36m')
     draw_2d_pose(uv2.cpu(), axs[1], kind='human36m')
 
     plt.savefig('fig.png')
+
+    with torch.no_grad():
+        uv1 = torch.unsqueeze(uv1, dim=0)
+        uv2 = torch.unsqueeze(uv2, dim=0)
+
+        K1 = torch.unsqueeze(K1, dim=0)
+        K2 = torch.unsqueeze(K2, dim=0)
+
+        R_est = find_rotation_matrices(uv1, uv2, K1, K2)
+        rot_similarity = compare_rotations(R1, R2, R_est)
+        print(rot_similarity)
