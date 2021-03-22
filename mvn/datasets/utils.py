@@ -62,8 +62,12 @@ def prepare_batch(batch, device, config, is_train=True):
     proj_matricies_batch = torch.stack([torch.stack([torch.from_numpy(camera.projection) for camera in camera_batch], dim=0) for camera_batch in batch['cameras']], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 4)
     proj_matricies_batch = proj_matricies_batch.float().to(device)
 
-    # camera matricies
-    intr_matricies_batch = torch.stack([torch.stack([torch.from_numpy(camera.K) for camera in camera_batch], dim=0) for camera_batch in batch['cameras']], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 3)
-    intr_matricies_batch = intr_matricies_batch.float().to(device)
+    # intrinsic matrices
+    K_batch = torch.stack([torch.stack([torch.from_numpy(camera.K) for camera in camera_batch], dim=0) for camera_batch in batch['cameras']], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 3)
+    K_batch = K_batch.float().to(device)
 
-    return images_batch, keypoints_3d_batch_gt, keypoints_3d_validity_batch_gt, proj_matricies_batch, intr_matricies_batch
+    # intrinsic matrices
+    R_batch = torch.stack([torch.stack([torch.from_numpy(camera.R) for camera in camera_batch], dim=0) for camera_batch in batch['cameras']], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 3)
+    R_batch = R_batch.float().to(device)
+
+    return images_batch, keypoints_3d_batch_gt, keypoints_3d_validity_batch_gt, proj_matricies_batch, K_batch, R_batch

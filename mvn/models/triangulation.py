@@ -148,7 +148,7 @@ class AlgebraicTriangulationNet(nn.Module):
         self.heatmap_multiplier = config.model.heatmap_multiplier
 
 
-    def forward(self, images, proj_matricies, intr_matricies, batch):
+    def forward(self, images, proj_matricies, K_matrices, R_matrices, batch):
         device = images.device
         batch_size, n_views = images.shape[:2]
 
@@ -185,25 +185,30 @@ class AlgebraicTriangulationNet(nn.Module):
         keypoints_2d_transformed[:, :, :, 1] = keypoints_2d[:, :, :, 1] * (image_shape[0] / heatmap_shape[0])
         keypoints_2d = keypoints_2d_transformed
 
-        def find_rotation_matrices(keypoints_2d, alg_confidences, intr_matricies):
-            points1 = keypoints_2d[:, 0]
-            points2 = keypoints_2d[:, 1]
-            K1 = intr_matricies[:, 0]
-            K2 = intr_matricies[:, 1]
-            # Take mean of the corresponding keypoints for the two views.
-            conf = ...
-            conf = torch.ones(points1.shape[:2], device=points1.device)
+        def find_rotation_matrices(keypoints_2d, alg_confidences, K_matricies):
+            #points1 = keypoints_2d[0, 1]
+            #points2 = keypoints_2d[0, 3]
+            K1 = torch.unsqueeze(K_matricies[0, 1], dim=0)
+            K2 = torch.unsqueeze(K_matricies[0, 3], dim=0)
+            # TODO: Take mean confidence of the corresponding keypoints for the two views.
+            #conf = torch.ones(points1.shape[:2], device=points1.device)
+            mean_conf = (alg_confidences[0, 1] + alg_confidences[0, 3]) / 2
+            mean_conf_idxs, _ = torch.sort(torch.argsort(mean_conf, dim=0, descending=True)[:10])
+#            _, conf_idxs = torch.sort(torch.argsort(mean_alg_confidences, dim=1, descending=True))[:10]
+            conf = torch.unsqueeze(mean_conf[mean_conf_idxs], dim=0)
+            points1 = torch.unsqueeze(keypoints_2d[0, 1, mean_conf_idxs], dim=0)
+            points2 = torch.unsqueeze(keypoints_2d[0, 1, mean_conf_idxs], dim=0)
             F = kornia.find_fundamental(points1, points2, conf)
             E = kornia.essential_from_fundamental(F, K1, K2)
             R1, R2, t = kornia.decompose_essential_matrix(E)
 
             return R1, R2
 
-        def compare_rotations(proj_matrices, est_proj_matrices):
-            rot_mat1 = proj_matrices[:, 0, :, :3]
-            rot_mat2 = proj_matrices[:, 1, :, :3]
+        def compare_rotations(R_matrices, est_proj_matrices):
+            rot_mat1 = R_matrices[0, 1]
+            rot_mat2 = R_matrices[0, 3]
 
-            rel_rot = torch.inverse(rot_mat1) @ rot_mat2
+            rel_rot = rot_mat2 @ torch.inverse(rot_mat1)
 
             rel_rot_quat = kornia.rotation_matrix_to_quaternion(rel_rot)
             proj_mat1_quat = kornia.rotation_matrix_to_quaternion(est_proj_matrices[0])
@@ -215,8 +220,8 @@ class AlgebraicTriangulationNet(nn.Module):
             return min(diff1, diff2)
 
         with torch.no_grad():
-            est_rot_matrices = find_rotation_matrices(keypoints_2d, alg_confidences, intr_matricies)
-            rot_similarity = compare_rotations(proj_matricies, est_rot_matrices)
+            est_rot_matrices = find_rotation_matrices(keypoints_2d, alg_confidences, K_matrices)
+            rot_similarity = compare_rotations(R_matrices, est_rot_matrices)
             print(rot_similarity)
 
         # triangulate
