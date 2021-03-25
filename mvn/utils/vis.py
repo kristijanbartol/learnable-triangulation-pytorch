@@ -12,7 +12,7 @@ from mpl_toolkits.mplot3d import axes3d, Axes3D
 
 
 from mvn.utils.img import image_batch_to_numpy, to_numpy, denormalize_image, resize_image
-from mvn.utils.multiview import project_3d_points_to_image_plane_without_distortion
+from mvn.utils.multiview import project_3d_points_to_image_plane_without_distortion, find_rotation_matrices, compare_rotations, IDXS
 
 CONNECTIVITY_DICT = {
     'cmu': [(0, 2), (0, 9), (1, 0), (1, 17), (2, 12), (3, 0), (4, 3), (5, 4), (6, 2), (7, 6), (8, 7), (9, 10), (10, 11), (12, 13), (13, 14), (15, 1), (16, 15), (17, 18)],
@@ -82,6 +82,7 @@ def fig_to_array(fig):
 
 
 def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matricies_batch,
+                    K_batch, R_batch,
                     keypoints_3d_batch_gt, keypoints_3d_batch_pred,
                     kind="cmu",
                     cuboids_batch=None,
@@ -133,11 +134,46 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
     # 2D keypoints (gt projected)
     axes[row_i, 0].set_ylabel("2d keypoints (gt projected)", size='large')
 
+    keypoints_2d_gt_projs = []
     for view_i in range(n_cols):
         axes[row_i][view_i].imshow(images[view_i])
         keypoints_2d_gt_proj = project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), keypoints_3d_batch_gt[batch_index].detach().cpu().numpy())
+#        keypoints_2d_gt_projs.append(project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), keypoints_3d_batch_gt[batch_index].detach().cpu().numpy()))
         draw_2d_pose(keypoints_2d_gt_proj, axes[row_i][view_i], kind=kind)
+#        draw_2d_pose(keypoints_2d_gt_projs[view_i], axes[row_i][view_i], kind=kind)
     row_i += 1
+
+    '''
+    keypoints_2d_gt_projs = np.array(keypoints_2d_gt_projs, dtype=np.float32)
+
+    def get_best_points_idxs(kpts_2d, kpts_2d_gt):
+        
+        def norm(k_pred, k_gt):
+            return np.sum(np.abs(k_pred - k_gt), axis=1)
+
+        errors = (norm(kpts_2d[0], kpts_2d_gt[0]) + norm(kpts_2d[1], kpts_2d_gt[1])) / 2.
+        best_points_idxs = np.sort(np.argsort(errors)[:10])
+        total_error = np.sum(errors[best_points_idxs])
+
+        return best_points_idxs, total_error
+
+    kpts_2d = np.stack((keypoints_2d[IDXS[0]], keypoints_2d[IDXS[1]]))
+    kpts_2d_gt = np.stack((keypoints_2d_gt_projs[IDXS[0]], keypoints_2d_gt_projs[IDXS[1]]))
+
+    best_points_idxs, kpt_2d_error = get_best_points_idxs(kpts_2d, kpts_2d_gt)
+
+    kpts_2d_torch = torch.tensor(kpts_2d[:, best_points_idxs], device='cuda', dtype=torch.float32)
+    #kpts_2d_torch = torch.tensor(kpts_2d_gt, device='cuda', dtype=torch.float32)
+
+    with torch.no_grad():
+        K_batch = torch.unsqueeze(K_batch[batch_index], dim=0)
+        R_batch = torch.unsqueeze(R_batch[batch_index], dim=0)
+
+        est_Rs = find_rotation_matrices(kpts_2d_torch, None, K_batch)
+        R_sim, m_idx = compare_rotations(R_batch, est_Rs)
+
+    print(f'({kpt_2d_error:.2f}, {R_sim:.2f})')
+    '''
 
     # 2D keypoints (pred projected)
     axes[row_i, 0].set_ylabel("2d keypoints (pred projected)", size='large')
@@ -177,6 +213,67 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
     plt.close('all')
 
     return fig_image
+
+
+'''
+def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matricies_batch,
+                    K_batch, R_batch,
+                    keypoints_3d_batch_gt, keypoints_3d_batch_pred,
+                    kind="cmu",
+                    cuboids_batch=None,
+                    confidences_batch=None,
+                    batch_index=0, size=5,
+                    max_n_cols=10,
+                    pred_kind=None
+                    ):
+    n_cols = min(4, max_n_cols)
+
+    # 2D keypoints (pred)
+    if keypoints_2d_batch is not None:
+        keypoints_2d = to_numpy(keypoints_2d_batch)[batch_index]
+
+    keypoints_2d_gt_projs = []
+    for view_i in range(n_cols):
+        #keypoints_2d_gt_proj = project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), keypoints_3d_batch_gt[batch_index].detach().cpu().numpy())
+        keypoints_2d_gt_projs.append(project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), keypoints_3d_batch_gt[batch_index].detach().cpu().numpy()))
+        #draw_2d_pose(keypoints_2d_gt_proj, axes[row_i][view_i], kind=kind)
+#        draw_2d_pose(keypoints_2d_gt_projs[view_i], axes[row_i][view_i], kind=kind)
+#    row_i += 1
+
+    keypoints_2d_gt_projs = np.array(keypoints_2d_gt_projs, dtype=np.float32)
+
+    def get_best_points_idxs(kpts_2d, kpts_2d_gt):
+        
+        def norm(k_pred, k_gt):
+            return np.sum(np.abs(k_pred - k_gt), axis=1)
+
+        errors = (norm(kpts_2d[0], kpts_2d_gt[0]) + norm(kpts_2d[1], kpts_2d_gt[1])) / 2.
+#        if kpts_2d[norm(kpts_2d[0], kpts_2d_gt[0]) <= 1.] and np.any(norm(kpts_2d[1], kpts_2d_gt[1]) <= 1.):
+#            print(norm(kpts_2d[0], kpts_2d_gt[0]), norm(kpts_2d[1], kpts_2d_gt[1]))
+        best_points_idxs = np.sort(np.argsort(errors)[:10])
+        total_error = np.sum(errors[best_points_idxs])
+
+        return best_points_idxs, total_error
+
+    kpts_2d = np.stack((keypoints_2d[IDXS[0]], keypoints_2d[IDXS[1]]))
+    kpts_2d_gt = np.stack((keypoints_2d_gt_projs[IDXS[0]], keypoints_2d_gt_projs[IDXS[1]]))
+
+    best_points_idxs, kpt_2d_error = get_best_points_idxs(kpts_2d, kpts_2d_gt)
+
+    kpts_2d_torch = torch.tensor(kpts_2d[:, best_points_idxs], device='cuda', dtype=torch.float32)
+    #kpts_2d_torch = torch.tensor(kpts_2d_gt, device='cuda', dtype=torch.float32)
+
+    with torch.no_grad():
+        K_batch = torch.unsqueeze(K_batch[batch_index], dim=0)
+        R_batch = torch.unsqueeze(R_batch[batch_index], dim=0)
+
+        est_Rs = find_rotation_matrices(kpts_2d_torch, None, K_batch)
+        R_sim, m_idx = compare_rotations(R_batch, est_Rs)
+
+    print(f'({kpt_2d_error:.2f}, {R_sim:.2f})')
+
+    return None
+'''
 
 
 def visualize_heatmaps(images_batch, heatmaps_batch,

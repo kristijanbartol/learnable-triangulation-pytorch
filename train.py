@@ -187,7 +187,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
 
                 keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None
                 if model_type == "alg" or model_type == "ransac":
-                    keypoints_3d_pred, keypoints_2d_pred, heatmaps_pred, confidences_pred = model(images_batch, proj_matricies_batch, K_batch, R_batch, batch)
+                    keypoints_3d_pred, keypoints_2d_pred, heatmaps_pred, confidences_pred = model(images_batch, proj_matricies_batch, batch)
                 elif model_type == "vol":
                     keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, proj_matricies_batch, batch)
 
@@ -271,13 +271,14 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                 # plot visualization
                 if master:
                     if n_iters_total % config.vis_freq == 0:# or total_l2.item() > 500.0:
+#                    if n_iters_total % 1 == 0:# or total_l2.item() > 500.0:
                         vis_kind = config.kind
                         if (config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False):
                             vis_kind = "coco"
 
                         for batch_i in range(min(batch_size, config.vis_n_elements)):
                             keypoints_vis = vis.visualize_batch(
-                                images_batch, heatmaps_pred, keypoints_2d_pred, proj_matricies_batch,
+                                images_batch, heatmaps_pred, keypoints_2d_pred, proj_matricies_batch, K_batch, R_batch,
                                 keypoints_3d_gt, keypoints_3d_pred,
                                 kind=vis_kind,
                                 cuboids_batch=cuboids_pred,
@@ -285,7 +286,8 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                                 batch_index=batch_i, size=5,
                                 max_n_cols=10
                             )
-                            writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
+                            if keypoints_vis is not None:
+                                writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
                             heatmaps_vis = vis.visualize_heatmaps(
                                 images_batch, heatmaps_pred,

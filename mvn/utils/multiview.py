@@ -1,6 +1,10 @@
 import numpy as np
 import torch
 
+import kornia
+
+IDXS = [3, 1]
+
 
 class Camera:
     def __init__(self, R, t, K, dist=None, name=""):
@@ -191,3 +195,40 @@ def calc_reprojection_error_matrix(keypoints_3d, keypoints_2d_list, proj_matrici
         reprojection_error_matrix.append(reprojection_error)
 
     return np.vstack(reprojection_error_matrix).T
+
+
+def find_rotation_matrices(keypoints_2d, alg_confidences, K_matricies):
+    K1 = torch.unsqueeze(K_matricies[0, IDXS[0]], dim=0)
+    K2 = torch.unsqueeze(K_matricies[0, IDXS[1]], dim=0)
+
+    if alg_confidences is not None:
+        mean_conf = (alg_confidences[0, IDXS[0]] + alg_confidences[0, IDXS[1]]) / 2
+        mean_conf_idxs, _ = torch.sort(torch.argsort(mean_conf, dim=0, descending=True)[:10])
+        conf = torch.unsqueeze(mean_conf[mean_conf_idxs], dim=0)
+        points1 = torch.unsqueeze(keypoints_2d[0, IDXS[0], mean_conf_idxs], dim=0)
+        points2 = torch.unsqueeze(keypoints_2d[0, IDXS[1], mean_conf_idxs], dim=0)
+    else:
+        conf = torch.ones([1, keypoints_2d.shape[1]], device='cuda', dtype=torch.float32)
+        points1 = torch.unsqueeze(keypoints_2d[0], dim=0)
+        points2 = torch.unsqueeze(keypoints_2d[1], dim=0)
+    
+    F = kornia.find_fundamental(points1, points2, conf)
+    E = kornia.essential_from_fundamental(F, K1, K2)
+    R1, R2, t = kornia.decompose_essential_matrix(E)
+
+    return R1, R2
+
+def compare_rotations(R_matrices, est_proj_matrices):
+    rot_mat1 = R_matrices[0, IDXS[0]]
+    rot_mat2 = R_matrices[0, IDXS[1]]
+
+    rel_rot = rot_mat2 @ torch.inverse(rot_mat1)
+
+    rel_rot_quat = kornia.rotation_matrix_to_quaternion(rel_rot)
+    proj_mat1_quat = kornia.rotation_matrix_to_quaternion(est_proj_matrices[0])
+    proj_mat2_quat = kornia.rotation_matrix_to_quaternion(est_proj_matrices[1])
+
+    diff1 = torch.norm(proj_mat1_quat - rel_rot_quat)
+    diff2 = torch.norm(proj_mat2_quat - rel_rot_quat)
+
+    return min(diff1, diff2), np.argmin([diff1, diff2])

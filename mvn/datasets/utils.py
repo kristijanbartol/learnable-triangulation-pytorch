@@ -2,6 +2,7 @@ import numpy as np
 import torch
 
 from mvn.utils.img import image_batch_to_torch
+from mvn.utils.multiview import Camera
 
 def make_collate_fn(randomize_n_views=True, min_n_views=10, max_n_views=31):
 
