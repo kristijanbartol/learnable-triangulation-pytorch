@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import time
 import random
+import cv2
 
 from mvn.utils.img import image_batch_to_numpy, to_numpy, denormalize_image, resize_image
 from mvn.utils.vis import draw_2d_pose
@@ -19,6 +20,28 @@ IMG2_PATH  = './data/human36m/processed/S1/Directions-1/imageSequence/55011271/i
 LABELS_PATH = './data/human36m/extra/human36m-multiview-labels-GTbboxes.npy'
 
 DEVICE='cuda'
+
+
+def draw_epipolar_lines(points, F, img, name):
+    # lines ... (a, b, c) ... ax + by + c = 0
+    lines = kornia.geometry.compute_correspond_epilines(points, F)[0].cpu().numpy()
+
+    start_points = np.zeros((points.shape[1], 2), dtype=np.float32)
+    end_points = np.zeros((points.shape[1], 2), dtype=np.float32)
+
+    start_points[:, 0] = 0.
+    # (a=0) ... y = -c/b
+    start_points[:, 1] = -lines[:, 2] / lines[:, 1]
+    end_points[:, 0] = img.shape[0]
+    # y = -(c + ax) / b
+    end_points[:, 1] = -(lines[:, 2] + lines[:, 0] * end_points[:, 0]) / lines[:, 1]
+
+    for p_idx in range(start_points.shape[0]):
+        cv2.line(img, tuple(start_points[p_idx]), tuple(end_points[p_idx]), color=(0, 255, 0))
+
+    cv2.imwrite(f'{name}.png', img)
+
+    return lines
 
 
 if __name__ == '__main__':
@@ -63,6 +86,7 @@ if __name__ == '__main__':
     draw_2d_pose(points[0].cpu(), axs[0][0], kind='human36m')
     draw_2d_pose(points[1].cpu(), axs[0][1], kind='human36m')
 
+    '''
     total_error = 0.
     for p_idx in range(points.shape[1] - 5):
         noise1 = (1. if torch.rand(1) < 0.5 else -1.) * torch.normal(mean=torch.tensor(0.), std=torch.tensor(0.5))
@@ -72,6 +96,7 @@ if __name__ == '__main__':
         total_error += torch.abs(noise1) + torch.abs(noise1)
         points[0][p_idx][0] += noise1
         points[0][p_idx][1] += noise1
+    '''
 
     draw_2d_pose(points[0].cpu(), axs[1][0], kind='human36m')
     draw_2d_pose(points[1].cpu(), axs[1][1], kind='human36m')
@@ -81,17 +106,17 @@ if __name__ == '__main__':
         Rs = torch.unsqueeze(Rs, dim=0)
 
         start_time = time.time()
-        R_est = find_rotation_matrices(points, None, Ks)
-        rot_similarity, min_index = compare_rotations(Rs, R_est)
+        R_est1, R_est2, F = find_rotation_matrices(points, None, Ks)
+        rot_similarity, min_index = compare_rotations(Rs, (R_est1, R_est2))
+        R_est = R_est1 if min_index == 0 else R_est2
 
     R1_est = Rs[0][IDXS[0]]
     t1_est = ts[IDXS[0]]
-    R2_est = R_est[min_index][0] @ Rs[0][IDXS[0]]
-    #R2_est = Rs[0][IDXS[1]]
+    R_est_rel = R_est[0] @ Rs[0][IDXS[0]]
     t2_est = ts[IDXS[1]]
 
     extr1_est = torch.cat((R1_est, t1_est), dim=1)
-    extr2_est = torch.cat((R2_est, t2_est), dim=1)
+    extr2_est = torch.cat((R_est_rel, t2_est), dim=1)
 
     uv1_est = X @ torch.transpose(Ks[0][IDXS[0]] @ extr1_est, 0, 1)
     uv1_est = (uv1_est / uv1_est[:, 2].reshape(uv1_est.shape[0], 1))[:, :2]
@@ -101,6 +126,20 @@ if __name__ == '__main__':
     draw_2d_pose(uv1_est.cpu(), axs[2][0], kind='human36m')
     draw_2d_pose(uv2_est.cpu(), axs[2][1], kind='human36m')
 
+    uv1_est = torch.unsqueeze(uv1_est, dim=0)
+    uv2_est = torch.unsqueeze(uv2_est, dim=0)
+
+    epipolar_lines = draw_epipolar_lines(uv2_est, torch.transpose(F, 1, 2), np.array(img1), 'view1')
+    epipolar_lines = draw_epipolar_lines(uv1_est, F, np.array(img2), 'view2')
+
+    total_error = 0.
+    for p_idx in range(points.shape[1] - 5):
+        noise = (1. if torch.rand(1) < 0.5 else -1.) * torch.normal(mean=torch.tensor(0.), std=torch.tensor(0.5))
+        total_error += torch.abs(noise)
+        points[0][p_idx] = move_along_epipolar(points[0][p_idx])
+        points[0][p_idx][0] += noise1
+        points[0][p_idx][1] += noise1
+
     plt.savefig('fig.png')
 
-    print(f'({total_error}, {torch.sum(torch.abs(uv2 - uv2_est))}, {rot_similarity})')
+    #print(f'({total_error}, {torch.sum(torch.abs(uv2 - uv2_est))}, {rot_similarity})')
