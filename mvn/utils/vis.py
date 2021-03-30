@@ -4,6 +4,7 @@ import skimage.transform
 import cv2
 
 import torch
+import kornia
 
 import matplotlib
 matplotlib.use('Agg')
@@ -12,7 +13,8 @@ from mpl_toolkits.mplot3d import axes3d, Axes3D
 
 
 from mvn.utils.img import image_batch_to_numpy, to_numpy, denormalize_image, resize_image
-from mvn.utils.multiview import project_3d_points_to_image_plane_without_distortion, find_rotation_matrices, compare_rotations, IDXS
+from mvn.utils.multiview import project_3d_points_to_image_plane_without_distortion, \
+    find_rotation_matrices, compare_rotations, create_fundamental_matrix, IDXS
 
 CONNECTIVITY_DICT = {
     'cmu': [(0, 2), (0, 9), (1, 0), (1, 17), (2, 12), (3, 0), (4, 3), (5, 4), (6, 2), (7, 6), (8, 7), (9, 10), (10, 11), (12, 13), (13, 14), (15, 1), (16, 15), (17, 18)],
@@ -79,6 +81,7 @@ def fig_to_array(fig):
     fig_image = np.array(fig.canvas.renderer._renderer)
 
     return fig_image
+
 
 
 def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matricies_batch,
@@ -215,9 +218,9 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
     return fig_image
 
 
-'''
-def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matricies_batch,
-                    K_batch, R_batch,
+
+def my_visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matricies_batch,
+                    K_batch, R_batch, t_batch,
                     keypoints_3d_batch_gt, keypoints_3d_batch_pred,
                     kind="cmu",
                     cuboids_batch=None,
@@ -256,24 +259,38 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
         return best_points_idxs, total_error
 
     kpts_2d = np.stack((keypoints_2d[IDXS[0]], keypoints_2d[IDXS[1]]))
-    kpts_2d_gt = np.stack((keypoints_2d_gt_projs[IDXS[0]], keypoints_2d_gt_projs[IDXS[1]]))
-
-    best_points_idxs, kpt_2d_error = get_best_points_idxs(kpts_2d, kpts_2d_gt)
-
-    kpts_2d_torch = torch.tensor(kpts_2d[:, best_points_idxs], device='cuda', dtype=torch.float32)
-    #kpts_2d_torch = torch.tensor(kpts_2d_gt, device='cuda', dtype=torch.float32)
+    kpts_2d_torch = torch.tensor(kpts_2d, device='cuda', dtype=torch.float32)
+    #kpts_2d_gt = np.stack((keypoints_2d_gt_projs[IDXS[0]], keypoints_2d_gt_projs[IDXS[1]]))
 
     with torch.no_grad():
         K_batch = torch.unsqueeze(K_batch[batch_index], dim=0)
         R_batch = torch.unsqueeze(R_batch[batch_index], dim=0)
 
-        est_Rs = find_rotation_matrices(kpts_2d_torch, None, K_batch)
-        R_sim, m_idx = compare_rotations(R_batch, est_Rs)
+        F_created = create_fundamental_matrix(K_batch, R_batch, t_batch)
 
-    print(f'({kpt_2d_error:.2f}, {R_sim:.2f})')
+        R_est1, R_est2, F = find_rotation_matrices(kpts_2d_torch, None, K_batch)
+        R_sim, m_idx = compare_rotations(R_batch, (R_est1, R_est2))
+
+        # (B=1, 2, 17, 2)
+        kpts_2d_torch = torch.unsqueeze(kpts_2d_torch, dim=0)
+
+        # NOTE: kpts_2d_torch = (B=1, 17, 2)
+        # Project epipolar lines from view 0.
+        lines = kornia.geometry.compute_correspond_epilines(kpts_2d_torch[:, 0], F_created)[0].cpu().numpy()
+
+        # NOTE: dist = |ax + by + c| / sqrt(a ** 2 + b ** 2)
+        # Calculate distances between keypoints of view 1 and the epipolar lines from view 0.
+        dists = np.abs(lines[:, 0] * kpts_2d[1, :, 0] + lines[:, 1] * kpts_2d[1, :, 1] + lines[:, 2]) \
+            / np.sqrt(lines[:, 0] ** 2 + lines[:, 1] ** 2)
+        print((dists < 0.5).sum())
+
+    #best_points_idxs, kpt_2d_error = get_best_points_idxs(kpts_2d, kpts_2d_gt)
+    #kpts_2d_torch = torch.tensor(kpts_2d[:, best_points_idxs], device='cuda', dtype=torch.float32)
+
+    #print(f'({kpt_2d_error:.2f}, {R_sim:.2f})')
+    print(dists)
 
     return None
-'''
 
 
 def visualize_heatmaps(images_batch, heatmaps_batch,

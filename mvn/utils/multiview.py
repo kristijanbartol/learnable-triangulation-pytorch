@@ -216,7 +216,8 @@ def find_rotation_matrices(keypoints_2d, alg_confidences, K_matricies):
     E = kornia.essential_from_fundamental(F, K1, K2)
     R1, R2, t = kornia.decompose_essential_matrix(E)
 
-    return R1, R2
+    return R1, R2, F
+
 
 def compare_rotations(R_matrices, est_proj_matrices):
     rot_mat1 = R_matrices[0, IDXS[0]]
@@ -232,3 +233,19 @@ def compare_rotations(R_matrices, est_proj_matrices):
     diff2 = torch.norm(proj_mat2_quat - rel_rot_quat)
 
     return min(diff1, diff2), np.argmin([diff1, diff2])
+
+
+def create_fundamental_matrix(Ks, Rs, ts):
+    R1 = Rs[:, IDXS[0]]
+    t1 = ts[:, IDXS[0]]
+    R2 = Rs[:, IDXS[1]]
+    t2 = ts[:, IDXS[1]]
+
+    E = kornia.geometry.essential_from_Rt(R1, t1, R2, t2)
+
+    K1 = Ks[:, IDXS[0]]
+    K2 = Ks[:, IDXS[1]]
+
+    F = kornia.geometry.fundamental_from_essential(E, K1, K2)
+
+    return F
