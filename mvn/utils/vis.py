@@ -239,10 +239,12 @@ def my_visualize_batch(candidate_points, images_batch, heatmaps_batch, keypoints
 
         # bbox_batch = (B=1, n_views=2, n_points=2, n_coord=2)
         bbox = bbox_batch[batch_index, IDXS]
-        bbox_height = bbox[0][0] - bbox[1][0]
+        bbox_height1 = abs(bbox[0][0][0] - bbox[0][1][0])
+        bbox_height2 = abs(bbox[1][0][0] - bbox[1][1][0])
 
         # TODO: Update magic number.
-        kpts_2d *= bbox_height / 384.
+        kpts_2d[0] *= bbox_height1 / 384.
+        kpts_2d[1] *= bbox_height2 / 384.
         kpts_2d[0, :, 0] += bbox[0][0][0]
         kpts_2d[0, :, 1] += bbox[0][0][1]
         kpts_2d[1, :, 0] += bbox[1][0][0]
@@ -250,7 +252,7 @@ def my_visualize_batch(candidate_points, images_batch, heatmaps_batch, keypoints
         # kpts_2d = (B=1, 2, 17, 2)
         kpts_2d = torch.unsqueeze(kpts_2d, dim=0)
 
-        # NOTE: kpts_2d_torch = (B=1, 17, 2)
+        # NOTE: kpts_2d_torch = (B=1, 2, 17, 2)
         # Project epipolar lines from view 0.
         lines = kornia.geometry.compute_correspond_epilines(kpts_2d[:, 0], F_created)[0]
 
