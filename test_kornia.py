@@ -6,6 +6,7 @@ from PIL import Image
 import time
 import random
 import cv2
+import os
 
 from mvn.utils.img import image_batch_to_numpy, to_numpy, denormalize_image, resize_image
 from mvn.utils.vis import draw_2d_pose
@@ -15,8 +16,13 @@ import kornia
 
 DATA_PATH = './data/human36m/processed/S1/Directions-1/annot.h5'
 PROJ_PATH = './proj.npy'
+
+IMG_DIR  = './data/human36m/processed/S1/Directions-1/imageSequence/'
+CAM1_NAME = '60457274'
+CAM2_NAME = '55011271'
 IMG1_PATH  = './data/human36m/processed/S1/Directions-1/imageSequence/60457274/img_000001.jpg'
 IMG2_PATH  = './data/human36m/processed/S1/Directions-1/imageSequence/55011271/img_000001.jpg'
+
 LABELS_PATH = './data/human36m/extra/human36m-multiview-labels-GTbboxes.npy'
 
 DEVICE='cuda'
@@ -45,9 +51,8 @@ def draw_epipolar_lines(points, F, img, name):
 
 
 if __name__ == '__main__':
-    #while True:
     labels = np.load(LABELS_PATH, allow_pickle=True).item()
-    X = torch.tensor(labels['table']['keypoints'][0], device=DEVICE, dtype=torch.float32)
+    #X = torch.tensor(labels['table']['keypoints'][0], device=DEVICE, dtype=torch.float32)
 
     frame = labels['table'][0]
     camera_labels = labels['cameras'][frame['subject_idx']]
@@ -59,105 +64,84 @@ if __name__ == '__main__':
     ts = torch.stack([torch.tensor(x.t, device=DEVICE, dtype=torch.float32) for x in cameras], dim=0)
     extrs = torch.stack([torch.tensor(x.extrinsics, device=DEVICE, dtype=torch.float32) for x in cameras])
 
-    img1 = Image.open(IMG1_PATH)
-    img2 = Image.open(IMG2_PATH)
+    Ks = torch.unsqueeze(Ks, dim=0)
+    Rs = torch.unsqueeze(Rs, dim=0)
+    ts = torch.unsqueeze(ts, dim=0)
 
-    fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(25, 25))
+    #fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(25, 25))
 
-    
-    axs[0][0].imshow(img1)
-    axs[0][1].imshow(img2)
-    axs[1][0].imshow(img1)
-    axs[1][1].imshow(img2)
-    axs[2][0].imshow(img1)
-    axs[2][1].imshow(img2)
-    
+    for img_idx, img_name in enumerate(os.listdir(os.path.join(IMG_DIR, CAM1_NAME))):
+        img1 = Image.open(os.path.join(IMG_DIR, CAM1_NAME, img_name))
+        img2 = Image.open(os.path.join(IMG_DIR, CAM2_NAME, img_name))
 
-    X = torch.cat((X, torch.ones((X.shape[0], 1), device=DEVICE)), dim=1)
+        X = torch.tensor(labels['table']['keypoints'][img_idx], device=DEVICE, dtype=torch.float32)
 
-    # NOTE: Can also decompose extrinsics to R|t.
-    uv1 = X @ torch.transpose(Ks[IDXS[0]] @ extrs[IDXS[0]], 0, 1)
-    uv1 = (uv1 / uv1[:, 2].reshape(uv1.shape[0], 1))
-    uv2 = X @ torch.transpose(Ks[IDXS[1]] @ extrs[IDXS[1]], 0, 1)
-    uv2 = (uv2 / uv2[:, 2].reshape(uv2.shape[0], 1))
+        #img1 = Image.open(IMG1_PATH)
+        #img2 = Image.open(IMG2_PATH)
 
-    uv1_uncalib = uv1 @ torch.inverse(Ks[IDXS[0]])
-    uv2_uncalib = uv2 @ torch.inverse(Ks[IDXS[1]])
+        '''
+        axs[0][0].imshow(img1)
+        axs[0][1].imshow(img2)
+        axs[1][0].imshow(img1)
+        axs[1][1].imshow(img2)
+        axs[2][0].imshow(img1)
+        axs[2][1].imshow(img2)
+        '''
 
-    uv1 = uv1[:, :2]
-    uv2 = uv2[:, :2]
+        X = torch.cat((X, torch.ones((X.shape[0], 1), device=DEVICE)), dim=1)
 
-    uv1_uncalib = uv1_uncalib[:, :2]
-    uv2_uncalib = uv2_uncalib[:, :2]
+        # NOTE: Can also decompose extrinsics to R|t.
+        uv1 = X @ torch.transpose(Ks[0, IDXS[0]] @ extrs[IDXS[0]], 0, 1)
+        uv1 = (uv1 / uv1[:, 2].reshape(uv1.shape[0], 1))
+        uv2 = X @ torch.transpose(Ks[0, IDXS[1]] @ extrs[IDXS[1]], 0, 1)
+        uv2 = (uv2 / uv2[:, 2].reshape(uv2.shape[0], 1))
 
-    points = torch.stack((uv1, uv2), dim=0)
-    points_uncalib = torch.stack((uv1_uncalib, uv2_uncalib), dim=0)
+        # Unhomogenous coordinates.
+        uv1 = uv1[:, :2]
+        uv2 = uv2[:, :2]
 
-    draw_2d_pose(points[0].cpu(), axs[0][0], kind='human36m')
-    draw_2d_pose(points[1].cpu(), axs[0][1], kind='human36m')
+        points = torch.transpose(torch.stack((uv1, uv2), dim=0), 0, 1)
 
-    '''
-    total_error = 0.
-    for p_idx in range(points.shape[1] - 5):
-        noise1 = (1. if torch.rand(1) < 0.5 else -1.) * torch.normal(mean=torch.tensor(0.), std=torch.tensor(0.5))
-        #noise2 = (1. if torch.rand(1) < 0.5 else -1.) * torch.normal(mean=torch.tensor(0.), std=torch.tensor(1.))
-        #noise1 = torch.clamp(noise1, -0.5, 0.5)
-        #noise2 = torch.clamp(noise2, -0.005, 0.005)
-        total_error += torch.abs(noise1) + torch.abs(noise1)
-        points[0][p_idx][0] += noise1
-        points[0][p_idx][1] += noise1
-    '''
+#        draw_2d_pose(points[0].cpu(), axs[0][0], kind='human36m')
+#        draw_2d_pose(points[1].cpu(), axs[0][1], kind='human36m')
 
-    draw_2d_pose(points[0].cpu(), axs[1][0], kind='human36m')
-    draw_2d_pose(points[1].cpu(), axs[1][1], kind='human36m')
+        with torch.no_grad():
+            #points = torch.unsqueeze(points, dim=0)
 
-    with torch.no_grad():
-        Ks = torch.unsqueeze(Ks, dim=0)
-        Rs = torch.unsqueeze(Rs, dim=0)
-        ts = torch.unsqueeze(ts, dim=0)
+            F_created = create_fundamental_matrix(Ks, Rs, ts)
 
-        points = torch.unsqueeze(points, dim=0)
-        points_uncalib = torch.unsqueeze(points_uncalib, dim=0)
+            start_time = time.time()
+            R_est1, R_est2, F = find_rotation_matrices(points, None, Ks)
+            rot_similarity, min_index = compare_rotations(Rs, (R_est1, R_est2))
+            R_est = R_est1 if min_index == 0 else R_est2
 
-        #F_created = create_fundamental_matrix(Ks, Rs, ts)
+        R1_est = Rs[0][IDXS[0]]
+        t1_est = ts[0][IDXS[0]]
+        R_est_rel = R_est[0] @ Rs[0][IDXS[0]]
+        t2_est = ts[0][IDXS[1]]
 
-        start_time = time.time()
-        R_est1, R_est2, F = find_rotation_matrices(points, None, Ks)
-        rot_similarity, min_index = compare_rotations(Rs, (R_est1, R_est2))
-        R_est = R_est1 if min_index == 0 else R_est2
+        extr1_est = torch.cat((R1_est, t1_est), dim=1)
+        extr2_est = torch.cat((R_est_rel, t2_est), dim=1)
 
-    R1_est = Rs[0][IDXS[0]]
-    t1_est = ts[0][IDXS[0]]
-    R_est_rel = R_est[0] @ Rs[0][IDXS[0]]
-    t2_est = ts[0][IDXS[1]]
+        uv1_est = X @ torch.transpose(Ks[0][IDXS[0]] @ extr1_est, 0, 1)
+        uv1_est = (uv1_est / uv1_est[:, 2].reshape(uv1_est.shape[0], 1))[:, :2]
+        uv2_est = X @ torch.transpose(Ks[0][IDXS[1]] @ extr2_est, 0, 1)
+        uv2_est = (uv2_est / uv2_est[:, 2].reshape(uv2_est.shape[0], 1))[:, :2]
+        
+        #draw_2d_pose(uv1_est.cpu(), axs[2][0], kind='human36m')
+        #draw_2d_pose(uv2_est.cpu(), axs[2][1], kind='human36m')
 
-    extr1_est = torch.cat((R1_est, t1_est), dim=1)
-    extr2_est = torch.cat((R_est_rel, t2_est), dim=1)
+        uv1_est = torch.unsqueeze(uv1_est, dim=0)
+        uv2_est = torch.unsqueeze(uv2_est, dim=0)
 
-    uv1_est = X @ torch.transpose(Ks[0][IDXS[0]] @ extr1_est, 0, 1)
-    uv1_est = (uv1_est / uv1_est[:, 2].reshape(uv1_est.shape[0], 1))[:, :2]
-    uv2_est = X @ torch.transpose(Ks[0][IDXS[1]] @ extr2_est, 0, 1)
-    uv2_est = (uv2_est / uv2_est[:, 2].reshape(uv2_est.shape[0], 1))[:, :2]
-    
-    draw_2d_pose(uv1_est.cpu(), axs[2][0], kind='human36m')
-    draw_2d_pose(uv2_est.cpu(), axs[2][1], kind='human36m')
+        _ = draw_epipolar_lines(uv2_est, torch.transpose(F_created, 1, 2), np.array(img1), 'view1')
+        epipolar_lines = draw_epipolar_lines(uv1_est, F_created, np.array(img2), 'view2')
 
-    uv1_est = torch.unsqueeze(uv1_est, dim=0)
-    uv2_est = torch.unsqueeze(uv2_est, dim=0)
+        uv2_est = uv2_est.cpu().numpy()
 
-    epipolar_lines = draw_epipolar_lines(uv2_est, torch.transpose(F, 1, 2), np.array(img1), 'view1')
-    epipolar_lines = draw_epipolar_lines(uv1_est, F, np.array(img2), 'view2')
+        dists = np.abs(epipolar_lines[:, 0] * uv2_est[0, :, 0] + epipolar_lines[:, 1] * uv2_est[0, :, 1] + epipolar_lines[:, 2]) \
+            / np.sqrt(epipolar_lines[:, 0] ** 2 + epipolar_lines[:, 1] ** 2)
 
-    '''
-    total_error = 0.
-    for p_idx in range(points.shape[1] - 5):
-        noise = (1. if torch.rand(1) < 0.5 else -1.) * torch.normal(mean=torch.tensor(0.), std=torch.tensor(0.5))
-        total_error += torch.abs(noise)
-        points[0][p_idx] = move_along_epipolar(points[0][p_idx])
-        points[0][p_idx][0] += noise1
-        points[0][p_idx][1] += noise1
-    '''
+        print(dists.sum())
 
-    plt.savefig('fig.png')
-
-    #print(f'({total_error}, {torch.sum(torch.abs(uv2 - uv2_est))}, {rot_similarity})')
+        #plt.savefig('fig.png')
