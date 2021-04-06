@@ -9,7 +9,7 @@ import cv2
 
 from mvn.utils.img import image_batch_to_numpy, to_numpy, denormalize_image, resize_image
 from mvn.utils.vis import draw_2d_pose
-from mvn.utils.multiview import Camera, find_rotation_matrices, compare_rotations, IDXS
+from mvn.utils.multiview import Camera, find_rotation_matrices, compare_rotations, create_fundamental_matrix, IDXS
 
 import kornia
 
@@ -77,11 +77,21 @@ if __name__ == '__main__':
 
     # NOTE: Can also decompose extrinsics to R|t.
     uv1 = X @ torch.transpose(Ks[IDXS[0]] @ extrs[IDXS[0]], 0, 1)
-    uv1 = (uv1 / uv1[:, 2].reshape(uv1.shape[0], 1))[:, :2]
+    uv1 = (uv1 / uv1[:, 2].reshape(uv1.shape[0], 1))
     uv2 = X @ torch.transpose(Ks[IDXS[1]] @ extrs[IDXS[1]], 0, 1)
-    uv2 = (uv2 / uv2[:, 2].reshape(uv2.shape[0], 1))[:, :2]
+    uv2 = (uv2 / uv2[:, 2].reshape(uv2.shape[0], 1))
+
+    uv1_uncalib = uv1 @ torch.inverse(Ks[IDXS[0]])
+    uv2_uncalib = uv2 @ torch.inverse(Ks[IDXS[1]])
+
+    uv1 = uv1[:, :2]
+    uv2 = uv2[:, :2]
+
+    uv1_uncalib = uv1_uncalib[:, :2]
+    uv2_uncalib = uv2_uncalib[:, :2]
 
     points = torch.stack((uv1, uv2), dim=0)
+    points_uncalib = torch.stack((uv1_uncalib, uv2_uncalib), dim=0)
 
     draw_2d_pose(points[0].cpu(), axs[0][0], kind='human36m')
     draw_2d_pose(points[1].cpu(), axs[0][1], kind='human36m')
@@ -104,6 +114,12 @@ if __name__ == '__main__':
     with torch.no_grad():
         Ks = torch.unsqueeze(Ks, dim=0)
         Rs = torch.unsqueeze(Rs, dim=0)
+        ts = torch.unsqueeze(ts, dim=0)
+
+        points = torch.unsqueeze(points, dim=0)
+        points_uncalib = torch.unsqueeze(points_uncalib, dim=0)
+
+        #F_created = create_fundamental_matrix(Ks, Rs, ts)
 
         start_time = time.time()
         R_est1, R_est2, F = find_rotation_matrices(points, None, Ks)
@@ -111,9 +127,9 @@ if __name__ == '__main__':
         R_est = R_est1 if min_index == 0 else R_est2
 
     R1_est = Rs[0][IDXS[0]]
-    t1_est = ts[IDXS[0]]
+    t1_est = ts[0][IDXS[0]]
     R_est_rel = R_est[0] @ Rs[0][IDXS[0]]
-    t2_est = ts[IDXS[1]]
+    t2_est = ts[0][IDXS[1]]
 
     extr1_est = torch.cat((R1_est, t1_est), dim=1)
     extr2_est = torch.cat((R_est_rel, t2_est), dim=1)
@@ -132,6 +148,7 @@ if __name__ == '__main__':
     epipolar_lines = draw_epipolar_lines(uv2_est, torch.transpose(F, 1, 2), np.array(img1), 'view1')
     epipolar_lines = draw_epipolar_lines(uv1_est, F, np.array(img2), 'view2')
 
+    '''
     total_error = 0.
     for p_idx in range(points.shape[1] - 5):
         noise = (1. if torch.rand(1) < 0.5 else -1.) * torch.normal(mean=torch.tensor(0.), std=torch.tensor(0.5))
@@ -139,6 +156,7 @@ if __name__ == '__main__':
         points[0][p_idx] = move_along_epipolar(points[0][p_idx])
         points[0][p_idx][0] += noise1
         points[0][p_idx][1] += noise1
+    '''
 
     plt.savefig('fig.png')
 

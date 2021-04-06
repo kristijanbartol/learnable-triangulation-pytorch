@@ -208,9 +208,11 @@ def find_rotation_matrices(keypoints_2d, alg_confidences, K_matricies):
         points1 = torch.unsqueeze(keypoints_2d[0, IDXS[0], mean_conf_idxs], dim=0)
         points2 = torch.unsqueeze(keypoints_2d[0, IDXS[1], mean_conf_idxs], dim=0)
     else:
-        conf = torch.ones([1, keypoints_2d.shape[1]], device='cuda', dtype=torch.float32)
-        points1 = torch.unsqueeze(keypoints_2d[0], dim=0)
-        points2 = torch.unsqueeze(keypoints_2d[1], dim=0)
+        conf = torch.ones([1, keypoints_2d.shape[2]], device='cuda', dtype=torch.float32)
+        #points1 = torch.unsqueeze(keypoints_2d[0], dim=0)
+        #points2 = torch.unsqueeze(keypoints_2d[1], dim=0)
+        points1 = keypoints_2d[:, 0]
+        points2 = keypoints_2d[:, 1]
     
     F = kornia.find_fundamental(points1, points2, conf)
     E = kornia.essential_from_fundamental(F, K1, K2)

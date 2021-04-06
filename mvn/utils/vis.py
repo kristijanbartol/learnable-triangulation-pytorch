@@ -218,8 +218,7 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
     return fig_image
 
 
-
-def my_visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matricies_batch,
+def my_visualize_batch(candidate_points, images_batch, heatmaps_batch, keypoints_2d_batch, proj_matricies_batch,
                     K_batch, R_batch, t_batch,
                     keypoints_3d_batch_gt, keypoints_3d_batch_pred,
                     kind="cmu",
@@ -229,38 +228,7 @@ def my_visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_ma
                     max_n_cols=10,
                     pred_kind=None
                     ):
-    n_cols = min(4, max_n_cols)
-
-    # 2D keypoints (pred)
-    if keypoints_2d_batch is not None:
-        keypoints_2d = to_numpy(keypoints_2d_batch)[batch_index]
-
-    keypoints_2d_gt_projs = []
-    for view_i in range(n_cols):
-        #keypoints_2d_gt_proj = project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), keypoints_3d_batch_gt[batch_index].detach().cpu().numpy())
-        keypoints_2d_gt_projs.append(project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), keypoints_3d_batch_gt[batch_index].detach().cpu().numpy()))
-        #draw_2d_pose(keypoints_2d_gt_proj, axes[row_i][view_i], kind=kind)
-#        draw_2d_pose(keypoints_2d_gt_projs[view_i], axes[row_i][view_i], kind=kind)
-#    row_i += 1
-
-    keypoints_2d_gt_projs = np.array(keypoints_2d_gt_projs, dtype=np.float32)
-
-    def get_best_points_idxs(kpts_2d, kpts_2d_gt):
-        
-        def norm(k_pred, k_gt):
-            return np.sum(np.abs(k_pred - k_gt), axis=1)
-
-        errors = (norm(kpts_2d[0], kpts_2d_gt[0]) + norm(kpts_2d[1], kpts_2d_gt[1])) / 2.
-#        if kpts_2d[norm(kpts_2d[0], kpts_2d_gt[0]) <= 1.] and np.any(norm(kpts_2d[1], kpts_2d_gt[1]) <= 1.):
-#            print(norm(kpts_2d[0], kpts_2d_gt[0]), norm(kpts_2d[1], kpts_2d_gt[1]))
-        best_points_idxs = np.sort(np.argsort(errors)[:10])
-        total_error = np.sum(errors[best_points_idxs])
-
-        return best_points_idxs, total_error
-
-    kpts_2d = np.stack((keypoints_2d[IDXS[0]], keypoints_2d[IDXS[1]]))
-    kpts_2d_torch = torch.tensor(kpts_2d, device='cuda', dtype=torch.float32)
-    #kpts_2d_gt = np.stack((keypoints_2d_gt_projs[IDXS[0]], keypoints_2d_gt_projs[IDXS[1]]))
+    kpts_2d = torch.stack((keypoints_2d_batch[batch_index][IDXS[0]], keypoints_2d_batch[batch_index][IDXS[1]]), dim=0)
 
     with torch.no_grad():
         K_batch = torch.unsqueeze(K_batch[batch_index], dim=0)
@@ -268,29 +236,33 @@ def my_visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_ma
 
         F_created = create_fundamental_matrix(K_batch, R_batch, t_batch)
 
-        R_est1, R_est2, F = find_rotation_matrices(kpts_2d_torch, None, K_batch)
-        R_sim, m_idx = compare_rotations(R_batch, (R_est1, R_est2))
-
         # (B=1, 2, 17, 2)
-        kpts_2d_torch = torch.unsqueeze(kpts_2d_torch, dim=0)
+        kpts_2d = torch.unsqueeze(kpts_2d, dim=0)
 
         # NOTE: kpts_2d_torch = (B=1, 17, 2)
         # Project epipolar lines from view 0.
-        lines = kornia.geometry.compute_correspond_epilines(kpts_2d_torch[:, 0], F_created)[0].cpu().numpy()
+        lines = kornia.geometry.compute_correspond_epilines(kpts_2d[:, 0], F_created)[0]
 
         # NOTE: dist = |ax + by + c| / sqrt(a ** 2 + b ** 2)
         # Calculate distances between keypoints of view 1 and the epipolar lines from view 0.
-        dists = np.abs(lines[:, 0] * kpts_2d[1, :, 0] + lines[:, 1] * kpts_2d[1, :, 1] + lines[:, 2]) \
-            / np.sqrt(lines[:, 0] ** 2 + lines[:, 1] ** 2)
-        print((dists < 0.5).sum())
+        dists = torch.abs(lines[:, 0] * kpts_2d[0, 1, :, 0] + lines[:, 1] * kpts_2d[0, 1, :, 1] + lines[:, 2]) \
+            / torch.sqrt(lines[:, 0] ** 2 + lines[:, 1] ** 2)
+        
+        condition = dists < 0.1
+        
+        print(condition.sum())
 
-    #best_points_idxs, kpt_2d_error = get_best_points_idxs(kpts_2d, kpts_2d_gt)
-    #kpts_2d_torch = torch.tensor(kpts_2d[:, best_points_idxs], device='cuda', dtype=torch.float32)
+        if candidate_points.shape[0] > 15:
+            R_est1, R_est2, F = find_rotation_matrices(candidate_points, None, K_batch)
+            R_sim, m_idx = compare_rotations(R_batch, (R_est1, R_est2))
+            print(f'{R_sim:.2f}')
+        else:
+            new_candidates = kpts_2d[0, :, condition]
+            candidate_points = torch.cat((candidate_points, new_candidates), dim=1)
 
-    #print(f'({kpt_2d_error:.2f}, {R_sim:.2f})')
     print(dists)
 
-    return None
+    return candidate_points
 
 
 def visualize_heatmaps(images_batch, heatmaps_batch,

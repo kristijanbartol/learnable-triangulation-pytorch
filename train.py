@@ -156,6 +156,8 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
     name = "train" if is_train else "val"
     model_type = config.model.name
 
+    candidate_points = torch.empty((2, 0, 2), device='cuda', dtype=torch.float32)
+
     if is_train:
         model.train()
     else:
@@ -278,7 +280,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                             vis_kind = "coco"
 
                         for batch_i in range(min(batch_size, config.vis_n_elements)):
-                            keypoints_vis = vis.my_visualize_batch(
+                            candidate_points = vis.my_visualize_batch(candidate_points,
                                 images_batch, heatmaps_pred, keypoints_2d_pred, 
                                 proj_matricies_batch, K_batch, R_batch, t_batch,
                                 keypoints_3d_gt, keypoints_3d_pred,
@@ -288,8 +290,8 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                                 batch_index=batch_i, size=5,
                                 max_n_cols=10
                             )
-                            if keypoints_vis is not None:
-                                writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
+                            #if keypoints_vis is not None:
+                            #    writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
                             heatmaps_vis = vis.visualize_heatmaps(
                                 images_batch, heatmaps_pred,
