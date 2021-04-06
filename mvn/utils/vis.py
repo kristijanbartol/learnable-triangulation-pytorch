@@ -219,7 +219,7 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
 
 
 def my_visualize_batch(candidate_points, images_batch, heatmaps_batch, keypoints_2d_batch, proj_matricies_batch,
-                    K_batch, R_batch, t_batch,
+                    Ks, R_batch, t_batch, bbox_batch,
                     keypoints_3d_batch_gt, keypoints_3d_batch_pred,
                     kind="cmu",
                     cuboids_batch=None,
@@ -231,12 +231,23 @@ def my_visualize_batch(candidate_points, images_batch, heatmaps_batch, keypoints
     kpts_2d = torch.stack((keypoints_2d_batch[batch_index][IDXS[0]], keypoints_2d_batch[batch_index][IDXS[1]]), dim=0)
 
     with torch.no_grad():
-        K_batch = torch.unsqueeze(K_batch[batch_index], dim=0)
+        K_batch = torch.unsqueeze(Ks, dim=0)
         R_batch = torch.unsqueeze(R_batch[batch_index], dim=0)
+        t_batch = torch.unsqueeze(t_batch[batch_index], dim=0)
 
         F_created = create_fundamental_matrix(K_batch, R_batch, t_batch)
 
-        # (B=1, 2, 17, 2)
+        # bbox_batch = (B=1, n_views=2, n_points=2, n_coord=2)
+        bbox = bbox_batch[batch_index, IDXS]
+        bbox_height = bbox[0][0] - bbox[1][0]
+
+        # TODO: Update magic number.
+        kpts_2d *= bbox_height / 384.
+        kpts_2d[0, :, 0] += bbox[0][0][0]
+        kpts_2d[0, :, 1] += bbox[0][0][1]
+        kpts_2d[1, :, 0] += bbox[1][0][0]
+        kpts_2d[1, :, 1] += bbox[1][0][1]
+        # kpts_2d = (B=1, 2, 17, 2)
         kpts_2d = torch.unsqueeze(kpts_2d, dim=0)
 
         # NOTE: kpts_2d_torch = (B=1, 17, 2)
@@ -248,17 +259,17 @@ def my_visualize_batch(candidate_points, images_batch, heatmaps_batch, keypoints
         dists = torch.abs(lines[:, 0] * kpts_2d[0, 1, :, 0] + lines[:, 1] * kpts_2d[0, 1, :, 1] + lines[:, 2]) \
             / torch.sqrt(lines[:, 0] ** 2 + lines[:, 1] ** 2)
         
-        condition = dists < 0.1
+        condition = dists < 0.5
         
         print(condition.sum())
 
-        if candidate_points.shape[0] > 15:
+        if candidate_points.shape[0] >= 15:
             R_est1, R_est2, F = find_rotation_matrices(candidate_points, None, K_batch)
             R_sim, m_idx = compare_rotations(R_batch, (R_est1, R_est2))
             print(f'{R_sim:.2f}')
         else:
-            new_candidates = kpts_2d[0, :, condition]
-            candidate_points = torch.cat((candidate_points, new_candidates), dim=1)
+            new_candidates = torch.transpose(kpts_2d[0, :, condition], 0, 1)
+            candidate_points = torch.cat((candidate_points, new_candidates), dim=0)
 
     print(dists)
 

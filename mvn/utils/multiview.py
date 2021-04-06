@@ -197,22 +197,35 @@ def calc_reprojection_error_matrix(keypoints_3d, keypoints_2d_list, proj_matrici
     return np.vstack(reprojection_error_matrix).T
 
 
-def find_rotation_matrices(keypoints_2d, alg_confidences, K_matricies):
-    K1 = torch.unsqueeze(K_matricies[0, IDXS[0]], dim=0)
-    K2 = torch.unsqueeze(K_matricies[0, IDXS[1]], dim=0)
+def essential_from_fundamental(F_mat: torch.Tensor, Ks) -> torch.Tensor:
+    r"""Get Essential matrix from Fundamental and Camera matrices.
 
-    if alg_confidences is not None:
-        mean_conf = (alg_confidences[0, IDXS[0]] + alg_confidences[0, IDXS[1]]) / 2
-        mean_conf_idxs, _ = torch.sort(torch.argsort(mean_conf, dim=0, descending=True)[:10])
-        conf = torch.unsqueeze(mean_conf[mean_conf_idxs], dim=0)
-        points1 = torch.unsqueeze(keypoints_2d[0, IDXS[0], mean_conf_idxs], dim=0)
-        points2 = torch.unsqueeze(keypoints_2d[0, IDXS[1], mean_conf_idxs], dim=0)
-    else:
-        conf = torch.ones([1, keypoints_2d.shape[2]], device='cuda', dtype=torch.float32)
-        #points1 = torch.unsqueeze(keypoints_2d[0], dim=0)
-        #points2 = torch.unsqueeze(keypoints_2d[1], dim=0)
-        points1 = keypoints_2d[:, 0]
-        points2 = keypoints_2d[:, 1]
+    Uses the method from Hartley/Zisserman 9.6 pag 257 (formula 9.12).
+
+    Args:
+        F_mat (torch.Tensor): The fundamental matrix with shape of :math:`(*, 3, 3)`.
+        K1 (torch.Tensor): The camera matrix from first camera with shape :math:`(*, 3, 3)`.
+        K2 (torch.Tensor): The camera matrix from second camera with shape :math:`(*, 3, 3)`.
+
+    Returns:
+        torch.Tensor: The essential matrix with shape :math:`(*, 3, 3)`.
+
+    """
+
+    return K2.transpose(-2, -1) @ F_mat @ K1
+
+
+def find_rotation_matrices(points, alg_confidences, Ks):
+    #K1 = torch.unsqueeze(K_matricies[0, IDXS[0]], dim=0)
+    #K2 = torch.unsqueeze(K_matricies[0, IDXS[1]], dim=0)
+
+    K1 = Ks[:, IDXS[0]]
+    K2 = Ks[:, IDXS[1]]
+
+    conf = torch.ones([1, points.shape[0]], device='cuda', dtype=torch.float32)
+    points = torch.unsqueeze(points, dim=0)
+    points1 = points[:, :, 0]
+    points2 = points[:, :, 1]
     
     F = kornia.find_fundamental(points1, points2, conf)
     E = kornia.essential_from_fundamental(F, K1, K2)
