@@ -23,6 +23,8 @@ CAM2_NAME = '55011271'
 IMG1_PATH  = './data/human36m/processed/S1/Directions-1/imageSequence/60457274/img_000001.jpg'
 IMG2_PATH  = './data/human36m/processed/S1/Directions-1/imageSequence/55011271/img_000001.jpg'
 
+ACTION_NAMES = os.listdir('./data/human36m/processed/S1/')
+
 LABELS_PATH = './data/human36m/extra/human36m-multiview-labels-GTbboxes.npy'
 
 DEVICE='cuda'
@@ -70,6 +72,7 @@ if __name__ == '__main__':
 
     #fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(25, 25))
 
+    #for action_idxs, action_name in enumerate(ACTION_NAMES):
     for img_idx, img_name in enumerate(os.listdir(os.path.join(IMG_DIR, CAM1_NAME))):
         img1 = Image.open(os.path.join(IMG_DIR, CAM1_NAME, img_name))
         img2 = Image.open(os.path.join(IMG_DIR, CAM2_NAME, img_name))

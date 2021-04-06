@@ -219,7 +219,7 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
 
 
 def my_visualize_batch(candidate_points, images_batch, heatmaps_batch, keypoints_2d_batch, proj_matricies_batch,
-                    Ks, R_batch, t_batch, bbox_batch,
+                    Ks, Rs, ts, bbox_batch,
                     keypoints_3d_batch_gt, keypoints_3d_batch_pred,
                     kind="cmu",
                     cuboids_batch=None,
@@ -232,8 +232,8 @@ def my_visualize_batch(candidate_points, images_batch, heatmaps_batch, keypoints
 
     with torch.no_grad():
         K_batch = torch.unsqueeze(Ks, dim=0)
-        R_batch = torch.unsqueeze(R_batch[batch_index], dim=0)
-        t_batch = torch.unsqueeze(t_batch[batch_index], dim=0)
+        R_batch = torch.unsqueeze(Rs, dim=0)
+        t_batch = torch.unsqueeze(ts, dim=0)
 
         F_created = create_fundamental_matrix(K_batch, R_batch, t_batch)
 

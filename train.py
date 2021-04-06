@@ -186,7 +186,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                     print("Found None batch")
                     continue
 
-                images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch, Ks, R_batch, t_batch, bbox_batch = \
+                images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch, Ks, Rs, ts, bbox_batch = \
                     dataset_utils.prepare_batch(batch, device, config)
 
                 keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None
@@ -283,7 +283,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                         for batch_i in range(min(batch_size, config.vis_n_elements)):
                             candidate_points = vis.my_visualize_batch(candidate_points, 
                                 images_batch, heatmaps_pred, keypoints_2d_pred, 
-                                proj_matricies_batch, Ks, R_batch, t_batch, bbox_batch,
+                                proj_matricies_batch, Ks, Rs, ts, bbox_batch,
                                 keypoints_3d_gt, keypoints_3d_pred,
                                 kind=vis_kind,
                                 cuboids_batch=cuboids_pred,
