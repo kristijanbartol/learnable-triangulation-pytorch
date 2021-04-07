@@ -9,7 +9,7 @@ import cv2
 import os
 
 from mvn.utils.img import image_batch_to_numpy, to_numpy, denormalize_image, resize_image
-from mvn.utils.vis import draw_2d_pose
+from mvn.utils.vis import draw_2d_pose, draw_epipolar_lines
 from mvn.utils.multiview import Camera, find_rotation_matrices, compare_rotations, create_fundamental_matrix, IDXS
 
 import kornia
@@ -28,28 +28,6 @@ ACTION_NAMES = os.listdir('./data/human36m/processed/S1/')
 LABELS_PATH = './data/human36m/extra/human36m-multiview-labels-GTbboxes.npy'
 
 DEVICE='cuda'
-
-
-def draw_epipolar_lines(points, F, img, name):
-    # lines ... (a, b, c) ... ax + by + c = 0
-    lines = kornia.geometry.compute_correspond_epilines(points, F)[0].cpu().numpy()
-
-    start_points = np.zeros((points.shape[1], 2), dtype=np.float32)
-    end_points = np.zeros((points.shape[1], 2), dtype=np.float32)
-
-    start_points[:, 0] = 0.
-    # (a=0) ... y = -c/b
-    start_points[:, 1] = -lines[:, 2] / lines[:, 1]
-    end_points[:, 0] = img.shape[0]
-    # y = -(c + ax) / b
-    end_points[:, 1] = -(lines[:, 2] + lines[:, 0] * end_points[:, 0]) / lines[:, 1]
-
-    for p_idx in range(start_points.shape[0]):
-        cv2.line(img, tuple(start_points[p_idx]), tuple(end_points[p_idx]), color=(0, 255, 0))
-
-    cv2.imwrite(f'{name}.png', img)
-
-    return lines
 
 
 if __name__ == '__main__':
@@ -138,7 +116,7 @@ if __name__ == '__main__':
         uv2_est = torch.unsqueeze(uv2_est, dim=0)
 
         _ = draw_epipolar_lines(uv2_est, torch.transpose(F_created, 1, 2), np.array(img1), 'view1')
-        epipolar_lines = draw_epipolar_lines(uv1_est, F_created, np.array(img2), 'view2')
+        epipolar_lines, _ = draw_epipolar_lines(uv1_est, F_created, np.array(img2), 'view2')
 
         uv2_est = uv2_est.cpu().numpy()
 

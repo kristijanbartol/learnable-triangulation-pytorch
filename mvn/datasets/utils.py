@@ -70,6 +70,8 @@ def prepare_batch(batch, device, config, is_train=True):
     camera_labels = labels['cameras'][frame['subject_idx']]
 
     # intrinsic matrices
+    K_batch = torch.stack([torch.stack([torch.from_numpy(camera.K) for camera in camera_batch], dim=0) for camera_batch in batch['cameras']], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 3)
+    K_batch = K_batch.float().to(device)
     Ks = torch.stack([torch.from_numpy(camera_labels['K'][x]) for x in range(4)], dim=0)  # shape (n_views, 3, 3)
     Ks = Ks.float().to(device)
 
@@ -88,4 +90,4 @@ def prepare_batch(batch, device, config, is_train=True):
     bbox_batch = torch.stack([torch.from_numpy(bbox_batch) for bbox_batch in batch['bbox']], dim=0)  # shape (batch_size, n_views, bbox_h, bbox_w)
     bbox_batch = bbox_batch.float().to(device)
 
-    return images_batch, keypoints_3d_batch_gt, keypoints_3d_validity_batch_gt, proj_matricies_batch, Ks, Rs, ts, bbox_batch
+    return images_batch, keypoints_3d_batch_gt, keypoints_3d_validity_batch_gt, proj_matricies_batch, Ks, K_batch, Rs, ts, bbox_batch
