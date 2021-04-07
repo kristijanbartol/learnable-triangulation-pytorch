@@ -15,7 +15,7 @@ import PIL
 
 from mvn.utils.img import image_batch_to_numpy, to_numpy, denormalize_image, resize_image
 from mvn.utils.multiview import project_3d_points_to_image_plane_without_distortion, \
-    find_rotation_matrices, compare_rotations, create_fundamental_matrix, IDXS
+    find_rotation_matrices, compare_rotations, create_fundamental_matrix, IDXS, evaluate_projection
 
 CONNECTIVITY_DICT = {
     'cmu': [(0, 2), (0, 9), (1, 0), (1, 17), (2, 12), (3, 0), (4, 3), (5, 4), (6, 2), (7, 6), (8, 7), (9, 10), (10, 11), (12, 13), (13, 14), (15, 1), (16, 15), (17, 18)],
@@ -260,6 +260,7 @@ def my_visualize_batch(candidate_points, iters_total, images_batch, heatmaps_bat
                     max_n_cols=10,
                     pred_kind=None
                     ):
+    print(f'{iters_total} {batch_index}')
     kpts_2d = torch.stack((keypoints_2d_batch[batch_index][IDXS[0]], keypoints_2d_batch[batch_index][IDXS[1]]), dim=0)
     kpts_2d_bboxed = torch.unsqueeze(kpts_2d.clone(), dim=0)
 
@@ -269,10 +270,6 @@ def my_visualize_batch(candidate_points, iters_total, images_batch, heatmaps_bat
 
     img1 = cv2.cvtColor(images[IDXS[0]], cv2.COLOR_BGR2RGB)
     img2 = cv2.cvtColor(images[IDXS[1]], cv2.COLOR_BGR2RGB)
-
-    #fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(10, 20))
-    #axs[0].imshow(img1)
-    #axs[1].imshow(img2)
 
     with torch.no_grad():
         K_batch = torch.unsqueeze(K_batch[batch_index], dim=0)
@@ -311,36 +308,34 @@ def my_visualize_batch(candidate_points, iters_total, images_batch, heatmaps_bat
         dists_bboxed = torch.abs(lines_bboxed[:, 0] * kpts_2d_bboxed[0, 1, :, 0] + lines_bboxed[:, 1] * kpts_2d_bboxed[0, 1, :, 1] + lines_bboxed[:, 2]) \
             / torch.sqrt(lines_bboxed[:, 0] ** 2 + lines_bboxed[:, 1] ** 2)
         
-        condition = dists < 0.8
-        condition_bboxed = dists_bboxed < 0.8
+        condition = dists < 0.3
+        condition_bboxed = dists_bboxed < 0.3
         
         print(condition.sum())
-        print(condition_bboxed.sum())
 
-        if candidate_points.shape[0] >= 15:
-            R_est1, R_est2, _ = find_rotation_matrices(candidate_points, None, Ks)
+        if candidate_points.shape[0] >= 10:
+            R_est1, R_est2, F = find_rotation_matrices(candidate_points, None, Ks)
             R_sim, m_idx = compare_rotations(Rs, (R_est1, R_est2))
             print(f'{R_sim:.5f}')
-        #else:
+            if R_sim < 0.01:
+                kpts_3d_gt = keypoints_3d_batch_gt[batch_index]
+                #np.save('R_est.npy', R_est1.cpu().numpy())
+                evaluate_projection(kpts_3d_gt, Ks[0], Rs[0], ts[0], R_est1[0] if m_idx == 0 else R_est2[0])
+                #evaluate_reconstruction(kpts_3d_gt, Ks, Rs, R_est2)
+
         new_candidates = torch.transpose(kpts_2d[0, :, condition], 0, 1)
         candidate_points = torch.cat((candidate_points, new_candidates), dim=0)
 
         epipol_img = draw_2d_pose_cv2(kpts_2d_bboxed[0, 1].cpu().numpy(), np.copy(img2))
         _, epipol_img = draw_epipolar_lines(torch.unsqueeze(kpts_2d_bboxed[0, 0], dim=0), F_created_bboxed, 
             epipol_img, str(iters_total) + str(batch_index), kpts_2d_bboxed[0, 1], dists_bboxed)
-        #draw_2d_pose(kpts_2d_bboxed[0, 0].cpu().numpy(), axs[0], kind='human36m')
-        #draw_2d_pose(kpts_2d_bboxed[0, 1].cpu().numpy(), axs[1], kind='human36m')
 
-        #axs[2].imshow(epipol_img)
         draw_2d_pose_cv2(kpts_2d_bboxed[0, 0].cpu().numpy(), img1)
         draw_2d_pose_cv2(kpts_2d_bboxed[0, 1].cpu().numpy(), img2)
         
         draw_images(img1, img2, epipol_img, f'{iters_total}{batch_index}')
 
-        #plt.savefig(f'./results/{iters_total}{batch_index}_keypoints.png')
-
     print(dists)
-    print(dists_bboxed)
 
     return candidate_points
 

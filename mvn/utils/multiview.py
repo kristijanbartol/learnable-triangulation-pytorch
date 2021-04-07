@@ -264,3 +264,32 @@ def create_fundamental_matrix(Ks, Rs, ts):
     F = kornia.geometry.fundamental_from_essential(E, K1, K2)
 
     return F
+
+
+def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est):
+    K2 = Ks[IDXS[1]]
+
+    R1 = Rs[IDXS[0]]
+    R2 = Rs[IDXS[1]]
+    R2_est = R_rel_est @ R1
+
+    t2 = ts[IDXS[1]]
+
+    extr2 = torch.cat((R2, t2), dim=1)
+    extr2_est = torch.cat((R2_est, t2), dim=1)
+
+    kpts_3d_gt = torch.cat((kpts_3d_gt, torch.ones((kpts_3d_gt.shape[0], 1), device='cuda')), dim=1)
+
+    kpts_2d_gt2 = kpts_3d_gt @ torch.transpose(K2 @ extr2, 0, 1)
+    kpts_2d_gt2 = (kpts_2d_gt2 / kpts_2d_gt2[:, 2].reshape(kpts_2d_gt2.shape[0], 1))[:, :2]
+    kpts_2d_est = kpts_3d_gt @ torch.transpose(K2 @ extr2_est, 0, 1)
+    kpts_2d_est = (kpts_2d_est / kpts_2d_est[:, 2].reshape(kpts_2d_est.shape[0], 1))[:, :2]
+
+    print(kpts_2d_gt2 - kpts_2d_est)
+
+
+def evaluate_reconstruction(kpts_3d_gt, Ks, Rs, R_rel_rot):
+    K1 = Ks[IDXS[0]]
+    K2 = Ks[IDXS[1]]
+
+    R1 = Rs[IDXS[0]]
