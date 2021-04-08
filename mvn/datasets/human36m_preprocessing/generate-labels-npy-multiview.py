@@ -11,6 +11,7 @@ import h5py
 # Change this line if you want to use Mask-RCNN or SSD bounding boxes instead of H36M's "ground truth".
 BBOXES_SOURCE = 'GT' # or 'MRCNN' or 'SSD'
 
+'''
 retval = {
     'subject_names': ['S1', 'S5', 'S6', 'S7', 'S8', 'S9', 'S11'],
     'camera_names': ['54138969', '55011271', '58860488', '60457274'],
@@ -31,6 +32,15 @@ retval = {
         'WalkingDog-1', 'WalkingDog-2',
         'WalkingTogether-1', 'WalkingTogether-2']
 }
+'''
+
+retval = {
+    'subject_names': ['S1'],
+    'camera_names': ['54138969', '55011271', '58860488', '60457274'],
+    'action_names': [
+        'Directions-1']
+}
+
 retval['cameras'] = np.empty(
     (len(retval['subject_names']), len(retval['camera_names'])),
     dtype=[

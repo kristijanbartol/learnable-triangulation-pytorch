@@ -309,7 +309,7 @@ def my_visualize_batch(candidate_points, iters_total, images_batch, heatmaps_bat
         dists_bboxed = torch.abs(lines_bboxed[:, 0] * kpts_2d_bboxed[0, 1, :, 0] + lines_bboxed[:, 1] * kpts_2d_bboxed[0, 1, :, 1] + lines_bboxed[:, 2]) \
             / torch.sqrt(lines_bboxed[:, 0] ** 2 + lines_bboxed[:, 1] ** 2)
         
-        condition = dists < 5.
+        condition = dists < 0.1
         
         print(f'Number of inliers: {candidate_points.shape[0] + condition.sum()} ({condition.sum()})')
 
