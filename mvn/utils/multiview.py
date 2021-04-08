@@ -267,14 +267,17 @@ def create_fundamental_matrix(Ks, Rs, ts):
 
 
 def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est):
+    K1 = Ks[IDXS[0]]
     K2 = Ks[IDXS[1]]
 
     R1 = Rs[IDXS[0]]
     R2 = Rs[IDXS[1]]
     R2_est = R_rel_est @ R1
 
+    t1 = ts[IDXS[0]]
     t2 = ts[IDXS[1]]
 
+    extr1 = torch.cat((R1, t1), dim=1)
     extr2 = torch.cat((R2, t2), dim=1)
     extr2_est = torch.cat((R2_est, t2), dim=1)
 
@@ -285,11 +288,41 @@ def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est):
     kpts_2d_est = kpts_3d_gt @ torch.transpose(K2 @ extr2_est, 0, 1)
     kpts_2d_est = (kpts_2d_est / kpts_2d_est[:, 2].reshape(kpts_2d_est.shape[0], 1))[:, :2]
 
-    print(kpts_2d_gt2 - kpts_2d_est)
+    print(f'Norm between 2D GT and est: {torch.mean(torch.norm(kpts_2d_gt2 - kpts_2d_est, dim=1)):.2f}')
+
+    kpts_2d_gt1 = kpts_3d_gt @ torch.transpose(K1 @ extr1, 0, 1)
+    kpts_2d_gt1 = (kpts_2d_gt1 / kpts_2d_gt1[:, 2].reshape(kpts_2d_gt1.shape[0], 1))[:, :2]
+
+    return torch.unsqueeze(torch.stack((kpts_2d_gt1, kpts_2d_gt2, kpts_2d_est), dim=0), dim=0)
 
 
-def evaluate_reconstruction(kpts_3d_gt, Ks, Rs, R_rel_rot):
+def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
+
     K1 = Ks[IDXS[0]]
     K2 = Ks[IDXS[1]]
 
     R1 = Rs[IDXS[0]]
+    R2 = Rs[IDXS[1]]
+    R2_est = R_rel_est @ R1
+
+    t1 = ts[IDXS[0]]
+    t2 = ts[IDXS[1]]
+
+    extr1 = torch.cat((R1, t1), dim=1)
+    extr2 = torch.cat((R2, t2), dim=1)
+    extr2_est = torch.cat((R2_est, t2), dim=1)
+
+    P1 = torch.unsqueeze(K1 @ extr1, dim=0)
+    P2 = torch.unsqueeze(K2 @ extr2, dim=0)
+    P2_est = torch.unsqueeze(K2 @ extr2_est, dim=0)
+
+    kpts_2d_gt1 = kpts_2d[:, 0]
+    kpts_2d_gt2 = kpts_2d[:, 1]
+    kpts_2d_est = kpts_2d[:, 2]     # NOTE: not used.
+
+    kpts_3d_gt_reproj = kornia.geometry.triangulate_points(P1, P2, kpts_2d_gt1, kpts_2d_gt2)[0]
+    kpts_3d_est = kornia.geometry.triangulate_points(P1, P2_est, kpts_2d_gt1, kpts_2d_gt2)[0]
+
+    print(f'Norm between 3D GT and reproj GT: {torch.mean(torch.norm(kpts_3d_gt - kpts_3d_gt_reproj, dim=1)):.2f}')
+
+    print(f'Norm between 3D GT and est: {torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=1)):.2f}')
