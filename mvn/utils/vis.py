@@ -245,8 +245,8 @@ def draw_epipolar_lines(points, F, img, name, points2=None, dists=None):
     return lines, img
 
 
-def draw_images(img1, img2, epipol_img, name):
-    img = np.concatenate((img1, img2, epipol_img), axis=1)
+def draw_images(imgs, name):
+    img = np.concatenate(imgs, axis=1)
     cv2.imwrite(f'./results/{name}.png', img)
 
 
@@ -262,7 +262,7 @@ def my_visualize_batch(candidate_points, iters_total, images_batch, heatmaps_bat
                     ):
     print(f'{iters_total} {batch_index}')
     kpts_2d = torch.stack((keypoints_2d_batch[batch_index][IDXS[0]], keypoints_2d_batch[batch_index][IDXS[1]]), dim=0)
-    #kpts_2d_bboxed = torch.unsqueeze(kpts_2d.clone(), dim=0)
+    kpts_2d_bboxed = torch.unsqueeze(kpts_2d.clone(), dim=0)
 
     images = image_batch_to_numpy(images_batch[batch_index])
     images = denormalize_image(images).astype(np.uint8)
@@ -270,6 +270,7 @@ def my_visualize_batch(candidate_points, iters_total, images_batch, heatmaps_bat
 
     img1 = cv2.cvtColor(images[IDXS[0]], cv2.COLOR_BGR2RGB)
     img2 = cv2.cvtColor(images[IDXS[1]], cv2.COLOR_BGR2RGB)
+    img_reproj = cv2.cvtColor(images[IDXS[1]], cv2.COLOR_BGR2RGB)
 
     with torch.no_grad():
         K_batch = torch.unsqueeze(K_batch[batch_index], dim=0)
@@ -278,7 +279,7 @@ def my_visualize_batch(candidate_points, iters_total, images_batch, heatmaps_bat
         ts = torch.unsqueeze(ts, dim=0)
 
         F_created = create_fundamental_matrix(Ks, Rs, ts)
-        #F_created_bboxed = create_fundamental_matrix(K_batch, Rs, ts)
+        F_created_bboxed = create_fundamental_matrix(K_batch, Rs, ts)
 
         # bbox_batch = (B=1, n_views=2, n_points=2, n_coord=2)
         bbox = bbox_batch[batch_index, IDXS]
@@ -298,17 +299,17 @@ def my_visualize_batch(candidate_points, iters_total, images_batch, heatmaps_bat
         # NOTE: kpts_2d_torch = (B=1, 2, 17, 2)
         # Project epipolar lines from view 0.
         lines = kornia.geometry.compute_correspond_epilines(kpts_2d[:, 0], F_created)[0]
-        #lines_bboxed = kornia.geometry.compute_correspond_epilines(kpts_2d_bboxed[:, 0], F_created_bboxed)[0]
+        lines_bboxed = kornia.geometry.compute_correspond_epilines(kpts_2d_bboxed[:, 0], F_created_bboxed)[0]
 
         # NOTE: dist = |ax + by + c| / sqrt(a ** 2 + b ** 2)
         # Calculate distances between keypoints of view 1 and the epipolar lines from view 0.
         dists = torch.abs(lines[:, 0] * kpts_2d[0, 1, :, 0] + lines[:, 1] * kpts_2d[0, 1, :, 1] + lines[:, 2]) \
             / torch.sqrt(lines[:, 0] ** 2 + lines[:, 1] ** 2)
 
-        #dists_bboxed = torch.abs(lines_bboxed[:, 0] * kpts_2d_bboxed[0, 1, :, 0] + lines_bboxed[:, 1] * kpts_2d_bboxed[0, 1, :, 1] + lines_bboxed[:, 2]) \
-        #    / torch.sqrt(lines_bboxed[:, 0] ** 2 + lines_bboxed[:, 1] ** 2)
+        dists_bboxed = torch.abs(lines_bboxed[:, 0] * kpts_2d_bboxed[0, 1, :, 0] + lines_bboxed[:, 1] * kpts_2d_bboxed[0, 1, :, 1] + lines_bboxed[:, 2]) \
+            / torch.sqrt(lines_bboxed[:, 0] ** 2 + lines_bboxed[:, 1] ** 2)
         
-        condition = dists < 0.8
+        condition = dists < 5.
         
         print(f'Number of inliers: {candidate_points.shape[0] + condition.sum()} ({condition.sum()})')
 
@@ -318,7 +319,18 @@ def my_visualize_batch(candidate_points, iters_total, images_batch, heatmaps_bat
             print(f'Quaternion similarity between the rotations: {R_sim:.5f}')
             kpts_3d_gt = keypoints_3d_batch_gt[batch_index]
             kpts_2d_projs = evaluate_projection(kpts_3d_gt, Ks[0], Rs[0], ts[0], R_est1[0] if m_idx == 0 else R_est2[0])
+
             evaluate_reconstruction(kpts_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_est1[0] if m_idx == 0 else R_est2[0])
+
+            kpts_2d_projs[0, 1, :, 0] -= bbox[1][0][0]
+            kpts_2d_projs[0, 1, :, 1] -= bbox[1][0][1]
+            kpts_2d_projs[0, 2, :, 0] -= bbox[1][0][0]
+            kpts_2d_projs[0, 2, :, 1] -= bbox[1][0][1]
+            kpts_2d_projs[0, 1] *= 384. / bbox_height2
+            kpts_2d_projs[0, 2] *= 384. / bbox_height2
+
+            draw_2d_pose_cv2(kpts_2d_projs[0, 1].cpu().numpy(), img_reproj)
+            draw_2d_pose_cv2(kpts_2d_projs[0, 2].cpu().numpy(), img_reproj)
 
         new_candidates = torch.transpose(kpts_2d[0, :, condition], 0, 1)
         candidate_points = torch.cat((candidate_points, new_candidates), dim=0)
@@ -329,8 +341,9 @@ def my_visualize_batch(candidate_points, iters_total, images_batch, heatmaps_bat
 
         draw_2d_pose_cv2(kpts_2d_bboxed[0, 0].cpu().numpy(), img1)
         draw_2d_pose_cv2(kpts_2d_bboxed[0, 1].cpu().numpy(), img2)
+
         
-        draw_images(img1, img2, epipol_img, f'{iters_total}{batch_index}')
+        draw_images([img1, img2, epipol_img, img_reproj], f'{iters_total}{batch_index}')
 
     #print(dists)
 
