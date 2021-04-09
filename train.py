@@ -157,7 +157,11 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
     model_type = config.model.name
 
     candidate_points = torch.empty((0, 2, 2), device='cuda', dtype=torch.float32)
-    Ks = torch.empty((0, 2, 3, 3), device='cuda', dtype=torch.float32)
+    all_2d_preds = torch.empty((0, 4, 17, 2), device='cuda', dtype=torch.float32)
+    all_bboxes = torch.empty((0, 4, 2, 2), device='cuda', dtype=torch.float32)
+    all_images = []
+
+    is_train = False
 
     if is_train:
         model.train()
@@ -178,168 +182,194 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
             iterator = islice(iterator, config.opt.n_iters_per_epoch)
 
         for iter_i, batch in iterator:
-            with autograd.detect_anomaly():
-                # measure data loading time
-                data_time = time.time() - end
+            #with autograd.detect_anomaly():
+            # measure data loading time
+            data_time = time.time() - end
 
-                if batch is None:
-                    print("Found None batch")
-                    continue
+            if batch is None:
+                print("Found None batch")
+                continue
 
-                images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch, Ks, K_batch, Rs, ts, bbox_batch = \
-                    dataset_utils.prepare_batch(batch, device, config)
+            images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch, Ks, K_batch, Rs, ts, bbox_batch = \
+                dataset_utils.prepare_batch(batch, device, config)
 
-                keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None
-                if model_type == "alg" or model_type == "ransac":
-                    keypoints_3d_pred, keypoints_2d_pred, heatmaps_pred, confidences_pred = model(images_batch, proj_matricies_batch, batch)
-                elif model_type == "vol":
-                    keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, proj_matricies_batch, batch)
+            keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None
+            if model_type == "alg" or model_type == "ransac":
+                keypoints_3d_pred, keypoints_2d_pred, heatmaps_pred, confidences_pred = model(images_batch, proj_matricies_batch, batch)
+            elif model_type == "vol":
+                keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, proj_matricies_batch, batch)
 
-                batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[3:])
-                n_joints = keypoints_3d_pred.shape[1]
+            batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[3:])
+            n_joints = keypoints_3d_pred.shape[1]
 
-                keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
+            keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
 
-                scale_keypoints_3d = config.opt.scale_keypoints_3d if hasattr(config.opt, "scale_keypoints_3d") else 1.0
+            scale_keypoints_3d = config.opt.scale_keypoints_3d if hasattr(config.opt, "scale_keypoints_3d") else 1.0
 
-                # 1-view case
-                if n_views == 1:
-                    if config.kind == "human36m":
-                        base_joint = 6
-                    elif config.kind == "coco":
-                        base_joint = 11
+            # 1-view case
+            if n_views == 1:
+                if config.kind == "human36m":
+                    base_joint = 6
+                elif config.kind == "coco":
+                    base_joint = 11
 
-                    keypoints_3d_gt_transformed = keypoints_3d_gt.clone()
-                    keypoints_3d_gt_transformed[:, torch.arange(n_joints) != base_joint] -= keypoints_3d_gt_transformed[:, base_joint:base_joint + 1]
-                    keypoints_3d_gt = keypoints_3d_gt_transformed
+                keypoints_3d_gt_transformed = keypoints_3d_gt.clone()
+                keypoints_3d_gt_transformed[:, torch.arange(n_joints) != base_joint] -= keypoints_3d_gt_transformed[:, base_joint:base_joint + 1]
+                keypoints_3d_gt = keypoints_3d_gt_transformed
 
-                    keypoints_3d_pred_transformed = keypoints_3d_pred.clone()
-                    keypoints_3d_pred_transformed[:, torch.arange(n_joints) != base_joint] -= keypoints_3d_pred_transformed[:, base_joint:base_joint + 1]
-                    keypoints_3d_pred = keypoints_3d_pred_transformed
+                keypoints_3d_pred_transformed = keypoints_3d_pred.clone()
+                keypoints_3d_pred_transformed[:, torch.arange(n_joints) != base_joint] -= keypoints_3d_pred_transformed[:, base_joint:base_joint + 1]
+                keypoints_3d_pred = keypoints_3d_pred_transformed
 
-                # calculate loss
-                total_loss = 0.0
-                loss = criterion(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
-                total_loss += loss
-                metric_dict[f'{config.opt.criterion}'].append(loss.item())
+            # calculate loss
+            total_loss = 0.0
+            loss = criterion(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
+            total_loss += loss
+            metric_dict[f'{config.opt.criterion}'].append(loss.item())
 
-                # volumetric ce loss
-                use_volumetric_ce_loss = config.opt.use_volumetric_ce_loss if hasattr(config.opt, "use_volumetric_ce_loss") else False
-                if use_volumetric_ce_loss:
-                    volumetric_ce_criterion = VolumetricCELoss()
+            # volumetric ce loss
+            use_volumetric_ce_loss = config.opt.use_volumetric_ce_loss if hasattr(config.opt, "use_volumetric_ce_loss") else False
+            if use_volumetric_ce_loss:
+                volumetric_ce_criterion = VolumetricCELoss()
 
-                    loss = volumetric_ce_criterion(coord_volumes_pred, volumes_pred, keypoints_3d_gt, keypoints_3d_binary_validity_gt)
-                    metric_dict['volumetric_ce_loss'].append(loss.item())
+                loss = volumetric_ce_criterion(coord_volumes_pred, volumes_pred, keypoints_3d_gt, keypoints_3d_binary_validity_gt)
+                metric_dict['volumetric_ce_loss'].append(loss.item())
 
-                    weight = config.opt.volumetric_ce_loss_weight if hasattr(config.opt, "volumetric_ce_loss_weight") else 1.0
-                    total_loss += weight * loss
+                weight = config.opt.volumetric_ce_loss_weight if hasattr(config.opt, "volumetric_ce_loss_weight") else 1.0
+                total_loss += weight * loss
 
-                metric_dict['total_loss'].append(total_loss.item())
+            metric_dict['total_loss'].append(total_loss.item())
 
-                if is_train:
-                    opt.zero_grad()
-                    total_loss.backward()
+            if is_train:
+                opt.zero_grad()
+                total_loss.backward()
 
-                    if hasattr(config.opt, "grad_clip"):
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), config.opt.grad_clip / config.opt.lr)
+                if hasattr(config.opt, "grad_clip"):
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), config.opt.grad_clip / config.opt.lr)
 
-                    metric_dict['grad_norm_times_lr'].append(config.opt.lr * misc.calc_gradient_norm(filter(lambda x: x[1].requires_grad, model.named_parameters())))
+                metric_dict['grad_norm_times_lr'].append(config.opt.lr * misc.calc_gradient_norm(filter(lambda x: x[1].requires_grad, model.named_parameters())))
 
-                    opt.step()
+                opt.step()
 
-                # calculate metrics
-                l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
-                metric_dict['l2'].append(l2.item())
+            # calculate metrics
+            l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
+            metric_dict['l2'].append(l2.item())
 
-                # base point l2
-                if base_points_pred is not None:
-                    base_point_l2_list = []
-                    for batch_i in range(batch_size):
-                        base_point_pred = base_points_pred[batch_i]
+            # base point l2
+            if base_points_pred is not None:
+                base_point_l2_list = []
+                for batch_i in range(batch_size):
+                    base_point_pred = base_points_pred[batch_i]
 
-                        if config.model.kind == "coco":
-                            base_point_gt = (keypoints_3d_gt[batch_i, 11, :3] + keypoints_3d[batch_i, 12, :3]) / 2
-                        elif config.model.kind == "mpii":
-                            base_point_gt = keypoints_3d_gt[batch_i, 6, :3]
+                    if config.model.kind == "coco":
+                        base_point_gt = (keypoints_3d_gt[batch_i, 11, :3] + keypoints_3d[batch_i, 12, :3]) / 2
+                    elif config.model.kind == "mpii":
+                        base_point_gt = keypoints_3d_gt[batch_i, 6, :3]
 
-                        base_point_l2_list.append(torch.sqrt(torch.sum((base_point_pred * scale_keypoints_3d - base_point_gt * scale_keypoints_3d) ** 2)).item())
+                    base_point_l2_list.append(torch.sqrt(torch.sum((base_point_pred * scale_keypoints_3d - base_point_gt * scale_keypoints_3d) ** 2)).item())
 
-                    base_point_l2 = 0.0 if len(base_point_l2_list) == 0 else np.mean(base_point_l2_list)
-                    metric_dict['base_point_l2'].append(base_point_l2)
+                base_point_l2 = 0.0 if len(base_point_l2_list) == 0 else np.mean(base_point_l2_list)
+                metric_dict['base_point_l2'].append(base_point_l2)
 
-                # save answers for evalulation
-                if not is_train:
-                    results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
-                    results['indexes'].append(batch['indexes'])
+            # save answers for evalulation
+            if not is_train:
+                results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
+                results['indexes'].append(batch['indexes'])
 
-                # plot visualization
-                if master:
+            # plot visualization
+            if master:
 #                    if n_iters_total % config.vis_freq == 0:# or total_l2.item() > 500.0:
-                    if n_iters_total % 1 == 0:# or total_l2.item() > 500.0:
-                        vis_kind = config.kind
-                        if (config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False):
-                            vis_kind = "coco"
+                if n_iters_total % 1 == 0:# or total_l2.item() > 500.0:
+                    vis_kind = config.kind
+                    if (config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False):
+                        vis_kind = "coco"
 
-                        for batch_i in range(min(batch_size, config.vis_n_elements)):
-                            candidate_points = vis.my_visualize_batch(candidate_points, n_iters_total,
-                                images_batch, heatmaps_pred, keypoints_2d_pred, 
-                                proj_matricies_batch, Ks, K_batch, Rs, ts, bbox_batch,
-                                keypoints_3d_gt, keypoints_3d_pred,
+                    all_2d_preds = torch.cat((all_2d_preds, keypoints_2d_pred), dim=0)
+                    all_bboxes = torch.cat((all_bboxes, bbox_batch), dim=0)
+                    all_images.append(images_batch.cpu().numpy())
+
+                    if not os.path.exists('Ks.npy'):
+                        np.save('Ks.npy', Ks.cpu().numpy())
+                    if not os.path.exists('Rs.npy'):
+                        np.save('Rs.npy', Rs.cpu().numpy())
+                    if not os.path.exists('ts.npy'):
+                        np.save('ts.npy', ts.cpu().numpy())
+
+                    for batch_i in range(min(batch_size, config.vis_n_elements)):
+                        '''
+                        candidate_points = vis.my_visualize_batch(candidate_points, n_iters_total,
+                            images_batch, heatmaps_pred, keypoints_2d_pred, 
+                            proj_matricies_batch, Ks, K_batch, Rs, ts, bbox_batch,
+                            keypoints_3d_gt, keypoints_3d_pred,
+                            kind=vis_kind,
+                            cuboids_batch=cuboids_pred,
+                            confidences_batch=confidences_pred,
+                            batch_index=batch_i, size=5,
+                            max_n_cols=10
+                        )
+                        '''
+                        #if keypoints_vis is not None:
+                        #    writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
+
+                        '''
+                        heatmaps_vis = vis.visualize_heatmaps(
+                            images_batch, heatmaps_pred,
+                            kind=vis_kind,
+                            batch_index=batch_i, size=5,
+                            max_n_rows=10, max_n_cols=10
+                        )
+                        writer.add_image(f"{name}/heatmaps/{batch_i}", heatmaps_vis.transpose(2, 0, 1), global_step=n_iters_total)
+                        '''
+
+                        if model_type == "vol":
+                            volumes_vis = vis.visualize_volumes(
+                                images_batch, volumes_pred, proj_matricies_batch,
                                 kind=vis_kind,
                                 cuboids_batch=cuboids_pred,
-                                confidences_batch=confidences_pred,
                                 batch_index=batch_i, size=5,
-                                max_n_cols=10
+                                max_n_rows=1, max_n_cols=16
                             )
-                            #if keypoints_vis is not None:
-                            #    writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
+                            writer.add_image(f"{name}/volumes/{batch_i}", volumes_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
-                            heatmaps_vis = vis.visualize_heatmaps(
-                                images_batch, heatmaps_pred,
-                                kind=vis_kind,
-                                batch_index=batch_i, size=5,
-                                max_n_rows=10, max_n_cols=10
-                            )
-                            writer.add_image(f"{name}/heatmaps/{batch_i}", heatmaps_vis.transpose(2, 0, 1), global_step=n_iters_total)
+                '''
+                # dump weights to tensoboard
+                if n_iters_total % config.vis_freq == 0:
+                    for p_name, p in model.named_parameters():
+                        try:
+                            writer.add_histogram(p_name, p.clone().cpu().data.numpy(), n_iters_total)
+                        except ValueError as e:
+                            print(e)
+                            print(p_name, p)
+                            exit()
 
-                            if model_type == "vol":
-                                volumes_vis = vis.visualize_volumes(
-                                    images_batch, volumes_pred, proj_matricies_batch,
-                                    kind=vis_kind,
-                                    cuboids_batch=cuboids_pred,
-                                    batch_index=batch_i, size=5,
-                                    max_n_rows=1, max_n_cols=16
-                                )
-                                writer.add_image(f"{name}/volumes/{batch_i}", volumes_vis.transpose(2, 0, 1), global_step=n_iters_total)
+                # dump to tensorboard per-iter loss/metric stats
+                if is_train:
+                    for title, value in metric_dict.items():
+                        writer.add_scalar(f"{name}/{title}", value[-1], n_iters_total)
 
-                    # dump weights to tensoboard
-                    if n_iters_total % config.vis_freq == 0:
-                        for p_name, p in model.named_parameters():
-                            try:
-                                writer.add_histogram(p_name, p.clone().cpu().data.numpy(), n_iters_total)
-                            except ValueError as e:
-                                print(e)
-                                print(p_name, p)
-                                exit()
+                # measure elapsed time
+                batch_time = time.time() - end
+                end = time.time()
 
-                    # dump to tensorboard per-iter loss/metric stats
-                    if is_train:
-                        for title, value in metric_dict.items():
-                            writer.add_scalar(f"{name}/{title}", value[-1], n_iters_total)
+                # dump to tensorboard per-iter time stats
+                writer.add_scalar(f"{name}/batch_time", batch_time, n_iters_total)
+                writer.add_scalar(f"{name}/data_time", data_time, n_iters_total)
 
-                    # measure elapsed time
-                    batch_time = time.time() - end
-                    end = time.time()
+                # dump to tensorboard per-iter stats about sizes
+                writer.add_scalar(f"{name}/batch_size", batch_size, n_iters_total)
+                writer.add_scalar(f"{name}/n_views", n_views, n_iters_total)
+                '''
 
-                    # dump to tensorboard per-iter time stats
-                    writer.add_scalar(f"{name}/batch_time", batch_time, n_iters_total)
-                    writer.add_scalar(f"{name}/data_time", data_time, n_iters_total)
+                n_iters_total += 1
+                print(n_iters_total)
 
-                    # dump to tensorboard per-iter stats about sizes
-                    writer.add_scalar(f"{name}/batch_size", batch_size, n_iters_total)
-                    writer.add_scalar(f"{name}/n_views", n_views, n_iters_total)
+        all_2d_preds = all_2d_preds.cpu().numpy()
+        all_bboxes = all_bboxes.cpu().numpy()
+        all_images = np.array(all_images)
 
-                    n_iters_total += 1
+        np.save('all_2d_preds.npy', all_2d_preds)
+        np.save('all_bboxes.npy', all_bboxes)
+        np.save('all_images.npy', all_images)
 
     # calculate evaluation metrics
     if master:
