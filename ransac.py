@@ -19,15 +19,14 @@ R_PATH = 'Rs.npy'
 T_PATH = 'ts.npy'
 BBOX_PATH = 'all_bboxes.npy'
 
-M = 5             # number of frames
+M = 20             # number of frames
 J = 17              # number of joints
 P = M * J           # total number of point correspondences    
 N = 100000           # trials
 eps = 0.6           # outlier probability
-S = 17              # sample size
-#I = (1 - eps) * P / 3   # number of inliers condition
-I = 17
-D = .5              # distance criterion
+S = 20              # sample size
+I = (1 - eps) * P / 1.9  # number of inliers condition
+D = .3              # distance criterion
 
 
 if __name__ == '__main__':
@@ -60,12 +59,13 @@ if __name__ == '__main__':
         point_corresponds = torch.tensor(np.concatenate(np.split(all_2d_preds, all_2d_preds.shape[0], axis=0), axis=2)[0], 
             device='cuda', dtype=torch.float32).transpose(0, 1)
 
-        all_2d_preds = torch.tensor(all_2d_preds, device='cuda', dtype=torch.float32)
-
         Ks = torch.unsqueeze(torch.tensor(Ks, device='cuda', dtype=torch.float32), dim=0)
         Rs = torch.unsqueeze(torch.tensor(Rs, device='cuda', dtype=torch.float32), dim=0)
         ts = torch.unsqueeze(torch.tensor(ts, device='cuda', dtype=torch.float32), dim=0)
 
+        all_2d_preds = torch.tensor(all_2d_preds, device='cuda', dtype=torch.float32)
+
+        '''
         # Using bboxed Ks to visualize created fundamental matrix for the first frame and calculate all distances.
         F_bboxed = create_fundamental_matrix(Ks_bboxed, Rs.expand((M, 4, 3, 3)), ts.expand((M, 4, 3, 1)))
         lines_bboxed = kornia.geometry.compute_correspond_epilines(all_2d_preds_bboxed[:, 0], F_bboxed)
@@ -110,6 +110,7 @@ if __name__ == '__main__':
         draw_images([epipol_gt_img], 'ransac')
 
         #point_corresponds = torch.cat((point_corresponds[condition], point_corresponds[~condition][:10]), axis=0)
+        '''
 
         counter = 0
         for i in range(N):
@@ -125,20 +126,6 @@ if __name__ == '__main__':
 
             condition = dists < D
             num_inliers = (condition).sum()
-            #print(f'Number of inliers (estimated): {num_inliers} ({P})')
-
-            '''
-            F_gt = create_fundamental_matrix(Ks, Rs, ts)
-            lines_gt = kornia.geometry.compute_correspond_epilines(torch.unsqueeze(point_corresponds[:, 0], dim=0), F_gt)[0]
-            dists_gt = torch.abs(lines_gt[:, 0] * point_corresponds[:, 1, 0] + \
-                lines_gt[:, 1] * point_corresponds[:, 1, 1] + lines_gt[:, 2]) \
-                / torch.sqrt(lines_gt[:, 0] ** 2 + lines_gt[:, 1] ** 2)
-            dists_gt = dists_gt.view(-1)
-
-            condition_gt = dists_gt < 1.
-            num_inliers_gt = (condition_gt).sum()
-            #print(f'Number of inliers (in-loop GT): {num_inliers_gt} ({P})')
-            '''
 
             if i % 10000 == 0:
                 print(f'Iterations: {i} (samples: {counter})')
@@ -161,13 +148,15 @@ if __name__ == '__main__':
                 dists_inliers = torch.abs(lines_inliers[:, 0] * point_corresponds[:, 1, 0] + \
                     lines_inliers[:, 1] * point_corresponds[:, 1, 1] + lines_inliers[:, 2]) \
                     / torch.sqrt(lines_inliers[:, 0] ** 2 + lines_inliers[:, 1] ** 2)
+                
+                print(torch.mean(torch.abs(dists_inliers)))
 
-                condition = dists_inliers < 1.
+                condition = dists_inliers < D
                 num_inliers = (condition).sum()
                 print(f'Number of inliers (inliers): {num_inliers} ({P})')
 
                 # TODO: Evaluate using 3D GT.
                 kpts_2d_projs = evaluate_projection(all_3d_gt[0], Ks[0], Rs[0], ts[0], R_inliers1[0] if m_idx == 0 else R_inliers2[0])
-                #evaluate_reconstruction(kpts_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_est1[0] if m_idx == 0 else R_est2[0])
+                evaluate_reconstruction(all_3d_gt[0], kpts_2d_projs, Ks[0], Rs[0], ts[0], R_est1[0] if m_idx == 0 else R_est2[0])
 
-                time.sleep(5)
+                #time.sleep(5)
