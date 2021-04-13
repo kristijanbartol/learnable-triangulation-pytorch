@@ -281,19 +281,25 @@ def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est):
     extr2 = torch.cat((R2, t2), dim=1)
     extr2_est = torch.cat((R2_est, t2), dim=1)
 
-    kpts_3d_gt = torch.cat((kpts_3d_gt, torch.ones((kpts_3d_gt.shape[0], 1), device='cuda')), dim=1)
+    K1 = torch.unsqueeze(K1, dim=0).expand((kpts_3d_gt.shape[0], 3, 3))
+    K2 = torch.unsqueeze(K2, dim=0).expand((kpts_3d_gt.shape[0], 3, 3))
+    extr1 = torch.unsqueeze(extr1, dim=0).expand((kpts_3d_gt.shape[0], 3, 4))
+    extr2 = torch.unsqueeze(extr2, dim=0).expand((kpts_3d_gt.shape[0], 3, 4))
+    extr2_est = torch.unsqueeze(extr2_est, dim=0).expand((kpts_3d_gt.shape[0], 3, 4))
 
-    kpts_2d_gt2 = kpts_3d_gt @ torch.transpose(K2 @ extr2, 0, 1)
-    kpts_2d_gt2 = (kpts_2d_gt2 / kpts_2d_gt2[:, 2].reshape(kpts_2d_gt2.shape[0], 1))[:, :2]
-    kpts_2d_est = kpts_3d_gt @ torch.transpose(K2 @ extr2_est, 0, 1)
-    kpts_2d_est = (kpts_2d_est / kpts_2d_est[:, 2].reshape(kpts_2d_est.shape[0], 1))[:, :2]
+    kpts_3d_gt = torch.cat((kpts_3d_gt, torch.ones((kpts_3d_gt.shape[0], kpts_3d_gt.shape[1], 1), device='cuda')), dim=2)
 
-    print(f'Norm between 2D GT and est: {torch.mean(torch.norm(kpts_2d_gt2 - kpts_2d_est, dim=1)):.2f}')
+    kpts_2d_gt2 = kpts_3d_gt @ torch.transpose(K2 @ extr2, 1, 2)
+    kpts_2d_gt2 = (kpts_2d_gt2 / kpts_2d_gt2[:, :, 2].reshape(kpts_2d_gt2.shape[0], kpts_2d_gt2.shape[1], 1))[:, :, :2]
+    kpts_2d_est = kpts_3d_gt @ torch.transpose(K2 @ extr2_est, 1, 2)
+    kpts_2d_est = (kpts_2d_est / kpts_2d_est[:, :, 2].reshape(kpts_2d_est.shape[0], kpts_2d_est.shape[1], 1))[:, :, :2]
 
-    kpts_2d_gt1 = kpts_3d_gt @ torch.transpose(K1 @ extr1, 0, 1)
-    kpts_2d_gt1 = (kpts_2d_gt1 / kpts_2d_gt1[:, 2].reshape(kpts_2d_gt1.shape[0], 1))[:, :2]
+    print(f'Norm between 2D GT and est: {torch.mean(torch.norm(kpts_2d_gt2 - kpts_2d_est, dim=2)):.2f}')
 
-    return torch.unsqueeze(torch.stack((kpts_2d_gt1, kpts_2d_gt2, kpts_2d_est), dim=0), dim=0)
+    kpts_2d_gt1 = kpts_3d_gt @ torch.transpose(K1 @ extr1, 1, 2)
+    kpts_2d_gt1 = (kpts_2d_gt1 / kpts_2d_gt1[:, :, 2].reshape(kpts_2d_gt1.shape[0], kpts_2d_gt1.shape[1], 1))[:, :, :2]
+
+    return torch.stack((kpts_2d_gt1, kpts_2d_gt2, kpts_2d_est), dim=0)
 
 
 def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
@@ -312,20 +318,20 @@ def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
     extr2 = torch.cat((R2, t2), dim=1)
     extr2_est = torch.cat((R2_est, t2), dim=1)
 
-    P1 = torch.unsqueeze(K1 @ extr1, dim=0)
-    P2 = torch.unsqueeze(K2 @ extr2, dim=0)
-    P2_est = torch.unsqueeze(K2 @ extr2_est, dim=0)
+    P1 = torch.unsqueeze(K1 @ extr1, dim=0).expand((kpts_3d_gt.shape[0], 3, 4))
+    P2 = torch.unsqueeze(K2 @ extr2, dim=0).expand((kpts_3d_gt.shape[0], 3, 4))
+    P2_est = torch.unsqueeze(K2 @ extr2_est, dim=0).expand((kpts_3d_gt.shape[0], 3, 4))
 
-    kpts_2d_gt1 = kpts_2d[:, 0]
-    kpts_2d_gt2 = kpts_2d[:, 1]
-    kpts_2d_est = kpts_2d[:, 2]     # NOTE: not used.
+    kpts_2d_gt1 = kpts_2d[0]
+    kpts_2d_gt2 = kpts_2d[1]
+    kpts_2d_est = kpts_2d[2]     # NOTE: not used.
 
-    kpts_3d_gt_reproj = kornia.geometry.triangulate_points(P1, P2, kpts_2d_gt1, kpts_2d_gt2)[0]
-    kpts_3d_est = kornia.geometry.triangulate_points(P1, P2_est, kpts_2d_gt1, kpts_2d_gt2)[0]
+    kpts_3d_gt_reproj = kornia.geometry.triangulate_points(P1, P2, kpts_2d_gt1, kpts_2d_gt2)
+    kpts_3d_est = kornia.geometry.triangulate_points(P1, P2_est, kpts_2d_gt1, kpts_2d_gt2)
 
     #print(f'Norm between 3D GT and reproj GT: {torch.mean(torch.norm(kpts_3d_gt - kpts_3d_gt_reproj, dim=1)):.2f}')
 
-    error = torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=1))
+    error = torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=2))
     # TODO: Why does the error stay the same when changing inlier set and 2D projection is chaning?
     print(f'Norm between 3D GT and est: {error:.2f}')
 

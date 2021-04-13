@@ -65,6 +65,7 @@ if __name__ == '__main__':
 
         all_2d_preds = torch.tensor(all_2d_preds, device='cuda', dtype=torch.float32)
 
+        '''
         ###################### GT #############################
         # Using bboxed Ks to visualize created fundamental matrix for the first frame and calculate all distances.
         F_bboxed = create_fundamental_matrix(Ks_bboxed, Rs.expand((M, 4, 3, 3)), ts.expand((M, 4, 3, 1)))
@@ -109,11 +110,18 @@ if __name__ == '__main__':
 
         draw_images([epipol_gt_img], 'ransac')
         #####################################################################
+        '''
 
         counter = 0
-        min_sim = torch.tensor([1000.], device='cuda', dtype=torch.float32)
-        selected_error = None
         best_error = torch.tensor([1000.], device='cuda', dtype=torch.float32)
+        min_sim = torch.tensor([1000.], device='cuda', dtype=torch.float32)
+        sim_error = None
+
+        max_inliers = -1
+        inlier_error = None
+
+        min_epipolar_dist = 1000.
+        epipolar_dist_error = None
         for i in range(N):
             selected_idxs = torch.tensor(np.random.choice(np.arange(point_corresponds.shape[0]), size=S), device='cuda')
             selected = point_corresponds[selected_idxs]
@@ -127,9 +135,6 @@ if __name__ == '__main__':
 
             condition = dists < D
             num_inliers = (condition).sum()
-
-            if i % 10000 == 0:
-                print(f'Iterations: {i} (samples: {counter})')
 
             if num_inliers > I:
                 counter += 1
@@ -149,24 +154,37 @@ if __name__ == '__main__':
                     lines_inliers[:, 1] * point_corresponds[:, 1, 1] + lines_inliers[:, 2]) \
                     / torch.sqrt(lines_inliers[:, 0] ** 2 + lines_inliers[:, 1] ** 2)
 
+                # Evaluate condition to get the number of inliers when initial inliers are used for estimation.
                 condition = dists_inliers < D
                 num_inliers = (condition).sum()
                 print(f'Number of inliers (inliers): {num_inliers} ({P})')
 
-                # TODO: Evaluate using 3D GT.
-                kpts_2d_projs = evaluate_projection(all_3d_gt[0], Ks[0], Rs[0], ts[0], R_inliers1[0] if m_idx == 0 else R_inliers2[0])
-                error_3d = evaluate_reconstruction(all_3d_gt[0], kpts_2d_projs, Ks[0], Rs[0], ts[0], R_est1[0] if m_idx == 0 else R_est2[0])
+                # Mean distance from keypoints to the epipolar lines.
+                epipolar_dist = torch.mean(dists_inliers)
+
+                # Evaluate 2D projections and 3D reprojections (triangulation).
+                kpts_2d_projs = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_inliers1[0] if m_idx == 0 else R_inliers2[0])
+                error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_est1[0] if m_idx == 0 else R_est2[0])
 
                 if error_3d < best_error:
                     best_error = error_3d
 
                 if R_sim < min_sim:
                     min_sim = R_sim
-                    selected_error = error_3d
+                    sim_error = error_3d
 
-                    print('PAUSING...')
-                    time.sleep(5)
+                if epipolar_dist < min_epipolar_dist:
+                    min_epipolar_dist = epipolar_dist
+                    epipolar_dist_error = error_3d
 
-        print(min_sim)
-        print(selected_error)
-        print(best_error)
+                if num_inliers > max_inliers:
+                    max_inliers = num_inliers
+                    inlier_error = error_3d
+
+        print(f'Best error: {best_error}')
+        print(f'Minimal quaternion similarity: {min_sim}')
+        print(f'3D error based on the minimal quaternion similarity: {sim_error}')
+        print(f'Maximal inlier set size: {max_inliers}')
+        print(f'3D error based on the maximal inlier set size: {inlier_error}')
+        print(f'Minimal mean distance between the keypoints and the epipolar lines: {min_epipolar_dist}')
+        print(f'3D error based on the minimal epipolar distance: {epipolar_dist_error}')
