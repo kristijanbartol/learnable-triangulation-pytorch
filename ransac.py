@@ -19,14 +19,14 @@ R_PATH = 'Rs.npy'
 T_PATH = 'ts.npy'
 BBOX_PATH = 'all_bboxes.npy'
 
-M = 20             # number of frames
+M = 50             # number of frames
 J = 17              # number of joints
 P = M * J           # total number of point correspondences    
-N = 100000           # trials
-eps = 0.6           # outlier probability
-S = 20              # sample size
-I = (1 - eps) * P / 1.9  # number of inliers condition
-D = .3              # distance criterion
+N = 20000           # trials
+eps = 0.75           # outlier probability
+S = 25              # sample size
+I = (1 - eps) * P  # number of inliers condition
+D = .5              # distance criterion
 
 
 if __name__ == '__main__':
@@ -65,7 +65,7 @@ if __name__ == '__main__':
 
         all_2d_preds = torch.tensor(all_2d_preds, device='cuda', dtype=torch.float32)
 
-        '''
+        ###################### GT #############################
         # Using bboxed Ks to visualize created fundamental matrix for the first frame and calculate all distances.
         F_bboxed = create_fundamental_matrix(Ks_bboxed, Rs.expand((M, 4, 3, 3)), ts.expand((M, 4, 3, 1)))
         lines_bboxed = kornia.geometry.compute_correspond_epilines(all_2d_preds_bboxed[:, 0], F_bboxed)
@@ -108,11 +108,12 @@ if __name__ == '__main__':
             epipol_gt_img, all_2d_preds_bboxed[0, 1], dists_bboxed)
 
         draw_images([epipol_gt_img], 'ransac')
-
-        #point_corresponds = torch.cat((point_corresponds[condition], point_corresponds[~condition][:10]), axis=0)
-        '''
+        #####################################################################
 
         counter = 0
+        min_sim = torch.tensor([1000.], device='cuda', dtype=torch.float32)
+        selected_error = None
+        best_error = torch.tensor([1000.], device='cuda', dtype=torch.float32)
         for i in range(N):
             selected_idxs = torch.tensor(np.random.choice(np.arange(point_corresponds.shape[0]), size=S), device='cuda')
             selected = point_corresponds[selected_idxs]
@@ -143,13 +144,10 @@ if __name__ == '__main__':
                 print(f'Quaternion similarity between the rotations: {R_sim:.5f}')
 
                 # Calculate distances and evaluations based on fundamental matrix estimated from inliers.
-                R_inliers1, R_inliers2, F_inliers = find_rotation_matrices(inliers, None, Ks)
                 lines_inliers = kornia.geometry.compute_correspond_epilines(torch.unsqueeze(point_corresponds[:, 0], dim=0), F_inliers)[0]
                 dists_inliers = torch.abs(lines_inliers[:, 0] * point_corresponds[:, 1, 0] + \
                     lines_inliers[:, 1] * point_corresponds[:, 1, 1] + lines_inliers[:, 2]) \
                     / torch.sqrt(lines_inliers[:, 0] ** 2 + lines_inliers[:, 1] ** 2)
-                
-                print(torch.mean(torch.abs(dists_inliers)))
 
                 condition = dists_inliers < D
                 num_inliers = (condition).sum()
@@ -157,6 +155,18 @@ if __name__ == '__main__':
 
                 # TODO: Evaluate using 3D GT.
                 kpts_2d_projs = evaluate_projection(all_3d_gt[0], Ks[0], Rs[0], ts[0], R_inliers1[0] if m_idx == 0 else R_inliers2[0])
-                evaluate_reconstruction(all_3d_gt[0], kpts_2d_projs, Ks[0], Rs[0], ts[0], R_est1[0] if m_idx == 0 else R_est2[0])
+                error_3d = evaluate_reconstruction(all_3d_gt[0], kpts_2d_projs, Ks[0], Rs[0], ts[0], R_est1[0] if m_idx == 0 else R_est2[0])
 
-                #time.sleep(5)
+                if error_3d < best_error:
+                    best_error = error_3d
+
+                if R_sim < min_sim:
+                    min_sim = R_sim
+                    selected_error = error_3d
+
+                    print('PAUSING...')
+                    time.sleep(5)
+
+        print(min_sim)
+        print(selected_error)
+        print(best_error)
