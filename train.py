@@ -158,8 +158,11 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
 
     candidate_points = torch.empty((0, 2, 2), device='cuda', dtype=torch.float32)
     all_2d_preds = torch.empty((0, 4, 17, 2), device='cuda', dtype=torch.float32)
+    all_3d_gt = torch.empty((0, 17, 3), device='cuda', dtype=torch.float32)
+    Ks_bboxed = torch.empty((0, 4, 3, 3), device='cuda', dtype=torch.float32)
     all_bboxes = torch.empty((0, 4, 2, 2), device='cuda', dtype=torch.float32)
-    all_images = []
+    #all_images = []
+    all_images = torch.empty((0, 2, 3, 384, 384), device='cuda', dtype=torch.float32)
 
     is_train = False
 
@@ -190,7 +193,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                 print("Found None batch")
                 continue
 
-            images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch, Ks, K_batch, Rs, ts, bbox_batch = \
+            images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch, Ks, K_bboxed, Rs, ts, bbox_batch = \
                 dataset_utils.prepare_batch(batch, device, config)
 
             keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None
@@ -285,8 +288,11 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                         vis_kind = "coco"
 
                     all_2d_preds = torch.cat((all_2d_preds, keypoints_2d_pred), dim=0)
+                    all_3d_gt = torch.cat((all_3d_gt, keypoints_3d_gt), dim=0)
+                    Ks_bboxed = torch.cat((Ks_bboxed, K_bboxed), dim=0)
                     all_bboxes = torch.cat((all_bboxes, bbox_batch), dim=0)
-                    all_images.append(images_batch.cpu().numpy())
+                    #all_images.append(images_batch.cpu().numpy())
+                    all_images = torch.cat((all_images, images_batch[:, multiview.IDXS]), dim=0)
 
                     if not os.path.exists('Ks.npy'):
                         np.save('Ks.npy', Ks.cpu().numpy())
@@ -299,7 +305,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                         '''
                         candidate_points = vis.my_visualize_batch(candidate_points, n_iters_total,
                             images_batch, heatmaps_pred, keypoints_2d_pred, 
-                            proj_matricies_batch, Ks, K_batch, Rs, ts, bbox_batch,
+                            proj_matricies_batch, Ks, K_bboxed, Rs, ts, bbox_batch,
                             keypoints_3d_gt, keypoints_3d_pred,
                             kind=vis_kind,
                             cuboids_batch=cuboids_pred,
@@ -364,11 +370,19 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                 print(n_iters_total)
 
         all_2d_preds = all_2d_preds.cpu().numpy()
-        all_bboxes = all_bboxes.cpu().numpy()
-        all_images = np.array(all_images)
-
         np.save('all_2d_preds.npy', all_2d_preds)
+
+        all_3d_gt = all_3d_gt.cpu().numpy()
+        np.save('all_3d_gt.npy', all_3d_gt)
+
+        Ks_bboxed = Ks_bboxed.cpu().numpy()
+        np.save('Ks_bboxed.npy', Ks_bboxed)
+
+        all_bboxes = all_bboxes.cpu().numpy()
         np.save('all_bboxes.npy', all_bboxes)
+
+        all_images = np.array(all_images)
+        all_images = all_images.cpu().numpy()
         np.save('all_images.npy', all_images)
 
     # calculate evaluation metrics

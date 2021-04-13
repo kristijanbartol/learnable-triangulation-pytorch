@@ -219,7 +219,7 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
     return fig_image
 
 
-def draw_epipolar_lines(points, F, img, name, points2=None, dists=None):
+def draw_epipolar_lines(points, F, img, points2=None, dists=None):
     # lines ... (a, b, c) ... ax + by + c = 0
     lines = kornia.geometry.compute_correspond_epilines(points, F)[0].cpu().numpy()
 
@@ -239,8 +239,6 @@ def draw_epipolar_lines(points, F, img, name, points2=None, dists=None):
     if points2 is not None:
         for p_idx, (x, y) in enumerate(points2):
             cv2.putText(img, f'{dists[p_idx]:.1f}', (x+10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 0, 0), 1, cv2.LINE_AA)
-
-    #cv2.imwrite(f'./results/{name}_epipolar.png', img)
 
     return lines, img
 
