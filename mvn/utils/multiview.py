@@ -216,9 +216,6 @@ def essential_from_fundamental(F_mat: torch.Tensor, Ks) -> torch.Tensor:
 
 
 def find_rotation_matrices(points, alg_confidences, Ks):
-    #K1 = torch.unsqueeze(K_matricies[0, IDXS[0]], dim=0)
-    #K2 = torch.unsqueeze(K_matricies[0, IDXS[1]], dim=0)
-
     K1 = Ks[:, IDXS[0]]
     K2 = Ks[:, IDXS[1]]
 
@@ -294,7 +291,7 @@ def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est):
     kpts_2d_est = kpts_3d_gt @ torch.transpose(K2 @ extr2_est, 1, 2)
     kpts_2d_est = (kpts_2d_est / kpts_2d_est[:, :, 2].reshape(kpts_2d_est.shape[0], kpts_2d_est.shape[1], 1))[:, :, :2]
 
-    print(f'Norm between 2D GT and est: {torch.mean(torch.norm(kpts_2d_gt2 - kpts_2d_est, dim=2)):.2f}')
+    #print(f'Norm between 2D GT and est: {torch.mean(torch.norm(kpts_2d_gt2 - kpts_2d_est, dim=2)):.2f}')
 
     kpts_2d_gt1 = kpts_3d_gt @ torch.transpose(K1 @ extr1, 1, 2)
     kpts_2d_gt1 = (kpts_2d_gt1 / kpts_2d_gt1[:, :, 2].reshape(kpts_2d_gt1.shape[0], kpts_2d_gt1.shape[1], 1))[:, :, :2]
@@ -332,7 +329,6 @@ def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
     #print(f'Norm between 3D GT and reproj GT: {torch.mean(torch.norm(kpts_3d_gt - kpts_3d_gt_reproj, dim=1)):.2f}')
 
     error = torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=2))
-    # TODO: Why does the error stay the same when changing inlier set and 2D projection is chaning?
     print(f'Norm between 3D GT and est: {error:.2f}')
 
     return error
