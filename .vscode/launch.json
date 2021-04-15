@@ -14,10 +14,24 @@
                 "--config", "experiments/human36m/train/human36m_alg.yaml", 
                 "--logdir", "./logs"
             ]
+
             //"args": [
             //    "./data/human36m", 
             //    "./data/human36m/extra/una-dinosauria-data/h36m",
             //    "./data/human36m/extra/bboxes-Human36M-GT.npy"
+            //]
+
+            //"args": [
+            //    "./data/human36m/processed/", 
+            //    "./data/human36m/extra/human36m-multiview-labels-GTbboxes.npy",
+            //    "0",
+            //    "5"
+            //]
+
+            //"args": [
+            //    "./data/human36m/", 
+            //    "./data/human36m/extra/human36m-multiview-labels-GTbboxes.npy",
+            //    "4"
             //]
         }
     ]

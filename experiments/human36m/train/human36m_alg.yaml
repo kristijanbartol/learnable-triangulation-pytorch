@@ -48,8 +48,7 @@ dataset:
     h36m_root: "./data/human36m/processed/"
     labels_path: "./data/human36m/extra/human36m-multiview-labels-GTbboxes.npy"
     with_damaged_actions: true
-    #    undistort_images: true
-    undistort_images: false
+    undistort_images: true
 
     scale_bbox: 1.0
 
@@ -63,8 +62,7 @@ dataset:
     h36m_root: "./data/human36m/processed/"
     labels_path: "./data/human36m/extra/human36m-multiview-labels-GTbboxes.npy"
     with_damaged_actions: true
-    #    undistort_images: true
-    undistort_images: false
+    undistort_images: true
 
     scale_bbox: 1.0
 

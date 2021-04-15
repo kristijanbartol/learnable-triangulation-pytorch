@@ -381,7 +381,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
         all_bboxes = all_bboxes.cpu().numpy()
         np.save('all_bboxes.npy', all_bboxes)
 
-        all_images = np.array(all_images)
+        #all_images = np.array(all_images)
         all_images = all_images.cpu().numpy()
         np.save('all_images.npy', all_images)
 

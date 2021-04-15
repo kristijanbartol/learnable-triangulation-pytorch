@@ -32,10 +32,12 @@ def make_collate_fn(randomize_n_views=True, min_n_views=10, max_n_views=31):
 
         batch['bbox'] = np.array([[ [[item['bbox'][i][0], item['bbox'][i][1]], [item['bbox'][i][2], item['bbox'][i][3]]] for item in items] for i in indexes], dtype=np.float32).swapaxes(0, 1)
 
+        '''
         try:
             batch['pred_keypoints_3d'] = np.array([item['pred_keypoints_3d'] for item in items])
         except:
             pass
+        '''
 
         return batch
 

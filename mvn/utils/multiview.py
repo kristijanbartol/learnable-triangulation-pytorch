@@ -329,6 +329,6 @@ def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
     #print(f'Norm between 3D GT and reproj GT: {torch.mean(torch.norm(kpts_3d_gt - kpts_3d_gt_reproj, dim=1)):.2f}')
 
     error = torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=2))
-    print(f'Norm between 3D GT and est: {error:.2f}')
+    #print(f'Norm between 3D GT and est: {error:.2f}')
 
     return error
