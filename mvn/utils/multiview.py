@@ -47,6 +47,13 @@ class Camera:
 
         self.K[0, 0], self.K[1, 1], self.K[0, 2], self.K[1, 2] = new_fx, new_fy, new_cx, new_cy
 
+    def pixel_in_3d(self, x):
+        return torch.inverse(torch.tensor(self.R))
+
+    @property
+    def center(self):
+        return self.t
+
     @property
     def projection(self):
         return self.K.dot(self.extrinsics)
@@ -54,6 +61,40 @@ class Camera:
     @property
     def extrinsics(self):
         return np.hstack([self.R, self.t])
+
+
+class TorchCamera:
+    def __init__(self, R, t, K, dist=None, name=""):
+        self.R = torch.tensor(R, device='cuda', dtype=torch.float32)
+        assert self.R.shape == (3, 3)
+
+        self.t = torch.tensor(t, device='cuda', dtype=torch.float32)
+        assert self.t.size == 3
+        self.t = self.t.reshape(3, 1)
+
+        self.K = torch.tensor(K, device='cuda', dtype=torch.float32)
+        assert self.K.shape == (3, 3)
+
+        self.dist = dist
+        if self.dist is not None:
+            self.dist = np.array(self.dist).copy().flatten()
+
+        self.name = name
+
+    def pixel_in_3d(self, x):
+        return torch.inverse(torch.tensor(self.R)) @ torch.inverse(self.K) @ x + self.center
+
+    @property
+    def center(self):
+        return self.t
+
+    @property
+    def projection(self):
+        return self.K @ self.extrinsics
+
+    @property
+    def extrinsics(self):
+        return torch.cat((self.R, self.t), dim=1)
 
 
 def euclidean_to_homogeneous(points):
@@ -216,8 +257,8 @@ def essential_from_fundamental(F_mat: torch.Tensor, Ks) -> torch.Tensor:
 
 
 def find_rotation_matrices(points, alg_confidences, Ks):
-    K1 = Ks[:, IDXS[0]]
-    K2 = Ks[:, IDXS[1]]
+    K1 = Ks[:, 0]
+    K2 = Ks[:, 1]
 
     conf = torch.ones([1, points.shape[0]], device='cuda', dtype=torch.float32)
     points = torch.unsqueeze(points, dim=0)
@@ -232,8 +273,8 @@ def find_rotation_matrices(points, alg_confidences, Ks):
 
 
 def compare_rotations(R_matrices, est_proj_matrices):
-    rot_mat1 = R_matrices[0, IDXS[0]]
-    rot_mat2 = R_matrices[0, IDXS[1]]
+    rot_mat1 = R_matrices[0, 0]
+    rot_mat2 = R_matrices[0, 1]
 
     rel_rot = rot_mat2 @ torch.inverse(rot_mat1)
 
@@ -248,15 +289,15 @@ def compare_rotations(R_matrices, est_proj_matrices):
 
 
 def create_fundamental_matrix(Ks, Rs, ts):
-    R1 = Rs[:, IDXS[0]]
-    t1 = ts[:, IDXS[0]]
-    R2 = Rs[:, IDXS[1]]
-    t2 = ts[:, IDXS[1]]
+    R1 = Rs[:, 0]
+    t1 = ts[:, 0]
+    R2 = Rs[:, 1]
+    t2 = ts[:, 1]
 
     E = kornia.geometry.essential_from_Rt(R1, t1, R2, t2)
 
-    K1 = Ks[:, IDXS[0]]
-    K2 = Ks[:, IDXS[1]]
+    K1 = Ks[:, 0]
+    K2 = Ks[:, 1]
 
     F = kornia.geometry.fundamental_from_essential(E, K1, K2)
 
@@ -264,15 +305,15 @@ def create_fundamental_matrix(Ks, Rs, ts):
 
 
 def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est):
-    K1 = Ks[IDXS[0]]
-    K2 = Ks[IDXS[1]]
+    K1 = Ks[0]
+    K2 = Ks[1]
 
-    R1 = Rs[IDXS[0]]
-    R2 = Rs[IDXS[1]]
+    R1 = Rs[0]
+    R2 = Rs[1]
     R2_est = R_rel_est @ R1
 
-    t1 = ts[IDXS[0]]
-    t2 = ts[IDXS[1]]
+    t1 = ts[0]
+    t2 = ts[1]
 
     extr1 = torch.cat((R1, t1), dim=1)
     extr2 = torch.cat((R2, t2), dim=1)
@@ -291,25 +332,24 @@ def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est):
     kpts_2d_est = kpts_3d_gt @ torch.transpose(K2 @ extr2_est, 1, 2)
     kpts_2d_est = (kpts_2d_est / kpts_2d_est[:, :, 2].reshape(kpts_2d_est.shape[0], kpts_2d_est.shape[1], 1))[:, :, :2]
 
-    #print(f'Norm between 2D GT and est: {torch.mean(torch.norm(kpts_2d_gt2 - kpts_2d_est, dim=2)):.2f}')
-
     kpts_2d_gt1 = kpts_3d_gt @ torch.transpose(K1 @ extr1, 1, 2)
     kpts_2d_gt1 = (kpts_2d_gt1 / kpts_2d_gt1[:, :, 2].reshape(kpts_2d_gt1.shape[0], kpts_2d_gt1.shape[1], 1))[:, :, :2]
 
-    return torch.stack((kpts_2d_gt1, kpts_2d_gt2, kpts_2d_est), dim=0)
+    error_2d = torch.mean(torch.norm(kpts_2d_gt2 - kpts_2d_est, dim=2))
+
+    return torch.stack((kpts_2d_gt1, kpts_2d_gt2, kpts_2d_est), dim=0), error_2d
 
 
 def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
+    K1 = Ks[0]
+    K2 = Ks[1]
 
-    K1 = Ks[IDXS[0]]
-    K2 = Ks[IDXS[1]]
-
-    R1 = Rs[IDXS[0]]
-    R2 = Rs[IDXS[1]]
+    R1 = Rs[0]
+    R2 = Rs[1]
     R2_est = R_rel_est @ R1
 
-    t1 = ts[IDXS[0]]
-    t2 = ts[IDXS[1]]
+    t1 = ts[0]
+    t2 = ts[1]
 
     extr1 = torch.cat((R1, t1), dim=1)
     extr2 = torch.cat((R2, t2), dim=1)
@@ -326,9 +366,44 @@ def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
     kpts_3d_gt_reproj = kornia.geometry.triangulate_points(P1, P2, kpts_2d_gt1, kpts_2d_gt2)
     kpts_3d_est = kornia.geometry.triangulate_points(P1, P2_est, kpts_2d_gt1, kpts_2d_gt2)
 
-    #print(f'Norm between 3D GT and reproj GT: {torch.mean(torch.norm(kpts_3d_gt - kpts_3d_gt_reproj, dim=1)):.2f}')
+    return torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=2))
 
-    error = torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=2))
-    #print(f'Norm between 3D GT and est: {error:.2f}')
 
-    return error
+def formula(P1, P2, V1, V2):
+    a1 = P1[0]
+    b1 = P1[1]
+    c1 = P1[2]
+    a2 = P2[0]
+    b2 = P2[1]
+    c2 = P2[2]
+
+    a12 = a1 - a2
+    b12 = b1 - b2
+    c12 = c1 - c2
+
+    p1 = V1[:, 0]
+    q1 = V1[:, 1]
+    r1 = V1[:, 2]
+    p2 = V2[:, 0]
+    q2 = V2[:, 1]
+    r2 = V2[:, 2]
+
+    return torch.abs(((q1 * r2 - q2 * r1) * a12 + (r1 * p2 - r2 * p1) * b12 + (p1 * q2 - p2 * q1) * c12) \
+        / torch.sqrt((q1 * r2 - q2 * r1) ** 2 + (r1 * p2 - r2 * p1) ** 2 + (p1 * q2 - p2 * q1) ** 2))
+
+
+def distance_between_projections(x1, x2, Ks, Rs, ts):
+    _x1 = torch.cat((x1, torch.ones((x1.shape[0], 1), device='cuda')), dim=1)
+    _x2 = torch.cat((x2, torch.ones((x2.shape[0], 1), device='cuda')), dim=1)
+
+    rel_rot = Rs[1] @ torch.inverse(Rs[0])
+
+    p1_ = torch.transpose(torch.inverse(Rs[0]) @ torch.inverse(Ks[0]) @ torch.transpose(_x1, 0, 1), 0, 1)
+    #p1 = torch.transpose(torch.inverse(Ks[0]) @ torch.transpose(_x1, 0, 1), 0, 1)
+    p2_ = torch.transpose(torch.inverse(Rs[1]) @ torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
+    #p2 = torch.transpose(torch.inverse(rel_rot) @ torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
+    #p2 = torch.transpose(torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
+
+    #return torch.abs(p1 @ ts[0] - p2 @ ts[1]).view(-1) / torch.norm(p1, dim=1)
+    #return formula(ts[0, :, 0], ts[1, :, 0], p1, p2)
+    return formula(torch.inverse(Rs[0]) @ ts[0, :, 0], torch.inverse(Rs[1]) @ ts[1, :, 0], p1_, p2_)

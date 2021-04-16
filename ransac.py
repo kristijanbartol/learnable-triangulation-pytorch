@@ -6,9 +6,10 @@ import time
 import itertools
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import random
 
 from mvn.utils.multiview import create_fundamental_matrix, IDXS, find_rotation_matrices, compare_rotations, \
-    evaluate_projection, evaluate_reconstruction
+    evaluate_projection, evaluate_reconstruction, distance_between_projections
 from mvn.utils.vis import draw_2d_pose_cv2, draw_images, draw_epipolar_lines
 from mvn.utils.img import denormalize_image, image_batch_to_numpy
 
@@ -22,12 +23,12 @@ R_PATH = 'Rs.npy'
 T_PATH = 'ts.npy'
 BBOX_PATH = 'all_bboxes.npy'
 
-M = 15             # number of frames
+M = 100             # number of frames
 J = 17              # number of joints
 P = M * J           # total number of point correspondences    
 N = 500           # trials
 eps = 0.75           # outlier probability
-S = 50              # sample size
+S = 90              # sample size
 #I = (1 - eps) * P  # number of inliers condition
 I = 0
 D = .5              # distance criterion
@@ -41,9 +42,9 @@ if __name__ == '__main__':
         all_2d_preds = np.load(PRED_PATH)
         all_3d_gt = torch.tensor(np.load(GT_PATH), device='cuda', dtype=torch.float32)
         #Ks_bboxed = torch.tensor(np.load(KS_BBOX_PATH), device='cuda', dtype=torch.float32)
-        Ks = torch.unsqueeze(torch.tensor(np.load(K_PATH), device='cuda', dtype=torch.float32), dim=0)
-        Rs = torch.unsqueeze(torch.tensor(np.load(R_PATH), device='cuda', dtype=torch.float32), dim=0)
-        ts = torch.unsqueeze(torch.tensor(np.load(T_PATH), device='cuda', dtype=torch.float32), dim=0)
+        Ks = torch.unsqueeze(torch.tensor(np.load(K_PATH), device='cuda', dtype=torch.float32), dim=0)[:, IDXS]
+        Rs = torch.unsqueeze(torch.tensor(np.load(R_PATH), device='cuda', dtype=torch.float32), dim=0)[:, IDXS]
+        ts = torch.unsqueeze(torch.tensor(np.load(T_PATH), device='cuda', dtype=torch.float32), dim=0)[:, IDXS]
         bboxes = np.load(BBOX_PATH)
 
         frame_selection = np.random.choice(np.arange(all_2d_preds.shape[0]), size=M)
@@ -73,7 +74,34 @@ if __name__ == '__main__':
 
         ########### GT ###########
         # Using unbboxed Ks to calculate all distances.
-        F_gt_initial = create_fundamental_matrix(Ks, Rs, ts)
+        #F_gt_initial = create_fundamental_matrix(Ks, Rs, ts)
+
+        dists = distance_between_projections(point_corresponds[:, 0], point_corresponds[:, 1], Ks[0], Rs[0], ts[0])
+        #dists = distance_between_projections(torch.unsqueeze(point_corresponds[:, 0], dim=0), 
+        #    torch.unsqueeze(point_corresponds[0, 1], dim=0), Ks[0], Rs[0], ts[0])
+        condition = dists < 1.
+        num_inliers = (condition).sum()
+        print(f'Number of inliers (GT): {num_inliers} ({P})')
+        print(f'Mean distances between corresponding lines (GT): {dists.mean()}')
+
+        def evaluate(condition):
+            # Evaluate fundamental matrix.
+            #inliers_gt_refine = point_corresponds[condition_gt_initial][:S]
+            inliers = point_corresponds[condition]
+            R_gt1, R_gt2, _ = find_rotation_matrices(inliers, None, Ks)
+            R_sim, m_idx = compare_rotations(Rs, (R_gt1, R_gt2))
+
+            kpts_2d_projs, error_2d = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_gt1[0] if m_idx == 0 else R_gt2[0])
+            error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt1[0] if m_idx == 0 else R_gt2[0])
+
+            print(f'Quaternion similarity (GT): {R_sim}')
+            print(f'2D error (GT): {error_2d}')
+            print(f'3D error (GT): {error_3d}')
+
+        evaluate(condition)
+        print('')
+
+        '''
         lines_gt_initial = kornia.geometry.compute_correspond_epilines(torch.unsqueeze(point_corresponds[:, 0], dim=0), F_gt_initial)[0]
         dists_gt_initial = torch.abs(lines_gt_initial[:, 0] * point_corresponds[:, 1, 0] + \
             lines_gt_initial[:, 1] * point_corresponds[:, 1, 1] + lines_gt_initial[:, 2]) \
@@ -83,7 +111,9 @@ if __name__ == '__main__':
         condition_gt_initial = dists_gt_initial < D
         num_inliers_gt_initial = (condition_gt_initial).sum()
         print(f'Number of inliers (initial GT): {num_inliers_gt_initial} ({P})')
+        '''
 
+        '''
         # Evaluate fundamental matrix.
         #inliers_gt_refine = point_corresponds[condition_gt_initial][:S]
         inliers_gt_refine = point_corresponds[condition_gt_initial]
@@ -104,6 +134,7 @@ if __name__ == '__main__':
         error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt_refine1[0] if m_idx == 0 else R_gt_refine2[0])
 
         print(f'3D error (refine GT): {error_3d}')
+        '''
         #####################################################################
 
         counter = 0
@@ -113,12 +144,11 @@ if __name__ == '__main__':
             selected = point_corresponds[selected_idxs]
 
             R_initial1, R_initial2, F_initial = find_rotation_matrices(selected, None, Ks)
-            _, m_idx = compare_rotations(Rs, (R_initial1, R_initial2))
+            R_sim, m_idx = compare_rotations(Rs, (R_initial1, R_initial2))
 
             lines_initial = kornia.geometry.compute_correspond_epilines(torch.unsqueeze(point_corresponds[:, 0], dim=0), F_initial)[0]
             dists_initial = torch.abs(lines_initial[:, 0] * point_corresponds[:, 1, 0] + lines_initial[:, 1] * point_corresponds[:, 1, 1] \
                 + lines_initial[:, 2]) / torch.sqrt(lines_initial[:, 0] ** 2 + lines_initial[:, 1] ** 2)
-            dists_initial = dists_initial.view(-1)
 
             condition_initial = dists_initial < D
             num_inliers_initial = (condition_initial).sum()
@@ -126,73 +156,17 @@ if __name__ == '__main__':
 
             if num_inliers_initial > I:
                 # Evaluate 2D projections and 3D reprojections (triangulation).
-                kpts_2d_projs = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_initial1[0] if m_idx == 0 else R_initial2[0])
+                kpts_2d_projs, error_2d = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_initial1[0] if m_idx == 0 else R_initial2[0])
                 error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_initial1[0] if m_idx == 0 else R_initial2[0])
+
+                line_dists_inlier = distance_between_projections(
+                    point_corresponds[condition_initial, 0], point_corresponds[condition_initial, 1], Ks[0], Rs[0], ts[0])
 
                 quaternion = kornia.rotation_matrix_to_quaternion(R_initial1 if m_idx == 0 else R_initial2)[0]
                 quat_error_pair = torch.unsqueeze(torch.cat((quaternion, torch.unsqueeze(error_3d, dim=0)), dim=0), dim=0)
                 quat_error_pairs = torch.cat((quat_error_pairs, quat_error_pair), dim=0)
-                print(f'{counter}. {quaternion} -> {error_3d:.2f}')
+                print(f'{counter}. ({quaternion} -> ({line_dists_inlier.mean():.3f}, {R_sim:.2f}, {error_3d:.2f})')
 
-                '''
-                ############# REFINEMENT ##############
-                inliers_initial = point_corresponds[condition_initial]
-                # TODO: Rename the following variables from _initial to _refine.
-                dist_criterion = D
-                for _ in range(10):
-                    dist_criterion *= 1.04
-                    # Estimate camera parameters using all inliers.
-                    inliers_initial = point_corresponds[condition_initial]
-                    
-                    R_initial1, R_initial2, F_initial = find_rotation_matrices(inliers_initial, None, Ks)
-                    R_sim, m_idx = compare_rotations(Rs, (R_initial1, R_initial2))
-
-                    # Calculate distances and evaluations based on fundamental matrix estimated from inliers.
-                    lines_initial = kornia.geometry.compute_correspond_epilines(torch.unsqueeze(point_corresponds[:, 0], dim=0), F_initial)[0]
-                    dists_initial = torch.abs(lines_initial[:, 0] * point_corresponds[:, 1, 0] + \
-                        lines_initial[:, 1] * point_corresponds[:, 1, 1] + lines_initial[:, 2]) \
-                        / torch.sqrt(lines_initial[:, 0] ** 2 + lines_initial[:, 1] ** 2)
-
-                    # Evaluate condition to get the number of inliers when initial inliers are used for estimation.
-                    condition_initial = dists_initial < dist_criterion
-                    num_inliers_initial = (condition_initial).sum()
-                    epipolar_dist_initial = torch.mean(dists_initial[condition_initial])
-
-                    #kpts_2d_projs = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_initial1[0] if m_idx == 0 else R_initial2[0])
-                    #error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_initial1[0] if m_idx == 0 else R_initial2[0])
-                    #print(f'Num inliers: {num_inliers_initial}')
-                    #print(f'Distance criterion: {dist_criterion:.4f}')
-
-                #input('')
-
-                dist_criterion = D
-                for _ in range(10):
-                    dist_criterion /= 1.05
-                    # Estimate camera parameters using all inliers.
-                    inliers_initial = point_corresponds[condition_initial]
-                    
-                    R_initial1, R_initial2, F_initial = find_rotation_matrices(inliers_initial, None, Ks)
-                    R_sim, m_idx = compare_rotations(Rs, (R_initial1, R_initial2))
-
-                    # Calculate distances and evaluations based on fundamental matrix estimated from inliers.
-                    lines_initial = kornia.geometry.compute_correspond_epilines(torch.unsqueeze(point_corresponds[:, 0], dim=0), F_initial)[0]
-                    dists_initial = torch.abs(lines_initial[:, 0] * point_corresponds[:, 1, 0] + \
-                        lines_initial[:, 1] * point_corresponds[:, 1, 1] + lines_initial[:, 2]) \
-                        / torch.sqrt(lines_initial[:, 0] ** 2 + lines_initial[:, 1] ** 2)
-
-                    # Evaluate condition to get the number of inliers when initial inliers are used for estimation.
-                    condition_initial = dists_initial < dist_criterion
-                    num_inliers_initial = (condition_initial).sum()
-                    epipolar_dist_initial = torch.mean(dists_initial[condition_initial])
-
-                    #kpts_2d_projs = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_initial1[0] if m_idx == 0 else R_initial2[0])
-                    #error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_initial1[0] if m_idx == 0 else R_initial2[0])
-                    #print(f'Num inliers: {num_inliers_initial}')
-                    #print(f'Distance criterion: {dist_criterion:.4f}')
-
-                #input('')
-                #########################################
-                '''
                 counter += 1
 
 
@@ -220,17 +194,6 @@ if __name__ == '__main__':
             plt.scatter(quat_error_pairs_np[mean_idx, idx1], quat_error_pairs_np[mean_idx, idx2], c='yellow')
             plt.savefig(f'quat_distro_{idx1}{idx2}.png')
 
-        for idx1, idx2 in combinations2d:
-            plt.clf()
-            plt.scatter(quat_error_pairs_np[:, idx1], quat_error_pairs_np[:, idx2], c='blue')
-            plt.savefig(f'quat_distro_{idx1}{idx2}_blue.png')
-
-        plt.clf()
-        for idx1, idx2 in combinations2d:
-            plt.scatter(quat_error_pairs_np[~camera_inliers, idx1], quat_error_pairs_np[~camera_inliers, idx2], c='blue')
-            plt.scatter(quat_error_pairs_np[camera_inliers, idx1], quat_error_pairs_np[camera_inliers, idx2], c='red')
-        plt.savefig(f'quat_distro_2d.png')
-
         combinations3d = list(itertools.combinations(range(4), 3))
 
         fig = plt.figure()
@@ -244,19 +207,4 @@ if __name__ == '__main__':
                 quat_error_pairs_np[camera_inliers, idx3], c='red')
             plt.savefig(f'quat_distro_{idx1}{idx2}{idx3}.png')
 
-        for idx1, idx2, idx3 in combinations3d:
-            ax.cla()
-            ax.scatter(quat_error_pairs_np[:, idx1], quat_error_pairs_np[:, idx2], \
-                quat_error_pairs_np[:, idx3], c='blue')
-            plt.savefig(f'quat_distro_{idx1}{idx2}{idx3}_blue.png')
-
-        ax.cla()
-        for idx1, idx2, idx3 in combinations3d:
-            ax.scatter(quat_error_pairs_np[~camera_inliers, idx1], quat_error_pairs_np[~camera_inliers, idx2], \
-                quat_error_pairs_np[~camera_inliers, idx3], c='blue')
-            ax.scatter(quat_error_pairs_np[camera_inliers, idx1], quat_error_pairs_np[camera_inliers, idx2], \
-                quat_error_pairs_np[camera_inliers, idx3], c='red')
-        plt.savefig(f'quat_distro_3d.png')
-
         print(f'Number of camera inliers (total): {np.sum(camera_inliers)}')
-
