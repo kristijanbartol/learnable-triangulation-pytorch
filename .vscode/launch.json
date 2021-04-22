@@ -10,6 +10,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
+            "justMyCode": true,
             "args": [
                 "--config", "experiments/human36m/train/human36m_alg.yaml", 
                 "--logdir", "./logs"

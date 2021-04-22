@@ -288,6 +288,39 @@ def compare_rotations(R_matrices, est_proj_matrices):
     return min(diff1, diff2), np.argmin([diff1, diff2])
 
 
+def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cand, t_cand=(None, None)):
+    K1 = Ks[0]
+    K2 = Ks[1]
+
+    R1 = Rs[0]
+
+    t1 = ts[0]
+
+    extr1 = torch.cat((R1, t1), dim=1)
+
+    candidate_tuples = [(R_cand[0], t_cand[0]), (R_cand[0], t_cand[1]), (R_cand[1], t_cand[0]), (R_cand[1], t_cand[1])]
+    sign_outcomes = []
+    sign_condition = lambda x: torch.all(x[:, 2] > 0.)
+    for Rt in candidate_tuples:
+        R_rel_est = Rt[0]
+        R2_est = R_rel_est @ R1
+
+        t2 = ts[1] if Rt[1] is None else Rt[1]
+
+        extr2_est = torch.cat((R2_est, t2), dim=1)
+
+        #P1 = torch.unsqueeze(K1 @ extr1, dim=0)
+        P1 = K1 @ extr1
+        #P2_est = torch.unsqueeze(K2 @ extr2_est, dim=0)
+        P2_est = K2 @ extr2_est
+
+        kpts_3d_est = kornia.geometry.triangulate_points(
+            P1, P2_est, point_corresponds[:, 0], point_corresponds[:, 1])
+        sign_outcomes.append(sign_condition(kpts_3d_est).cpu())
+
+    return candidate_tuples[sign_outcomes.index(True)]
+
+
 def create_fundamental_matrix(Ks, Rs, ts):
     R1 = Rs[:, 0]
     t1 = ts[:, 0]
@@ -363,7 +396,7 @@ def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
     kpts_2d_gt2 = kpts_2d[1]
     kpts_2d_est = kpts_2d[2]     # NOTE: not used.
 
-    kpts_3d_gt_reproj = kornia.geometry.triangulate_points(P1, P2, kpts_2d_gt1, kpts_2d_gt2)
+    #kpts_3d_gt_reproj = kornia.geometry.triangulate_points(P1, P2, kpts_2d_gt1, kpts_2d_gt2)
     kpts_3d_est = kornia.geometry.triangulate_points(P1, P2_est, kpts_2d_gt1, kpts_2d_gt2)
 
     return torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=2))
@@ -392,18 +425,20 @@ def formula(P1, P2, V1, V2):
         / torch.sqrt((q1 * r2 - q2 * r1) ** 2 + (r1 * p2 - r2 * p1) ** 2 + (p1 * q2 - p2 * q1) ** 2))
 
 
-def distance_between_projections(x1, x2, Ks, Rs, ts):
+def distance_between_projections(x1, x2, Ks, R1, R_rel, ts):
     _x1 = torch.cat((x1, torch.ones((x1.shape[0], 1), device='cuda')), dim=1)
     _x2 = torch.cat((x2, torch.ones((x2.shape[0], 1), device='cuda')), dim=1)
 
-    rel_rot = Rs[1] @ torch.inverse(Rs[0])
+    #rel_rot = Rs[1] @ torch.inverse(Rs[0])
 
-    p1_ = torch.transpose(torch.inverse(Rs[0]) @ torch.inverse(Ks[0]) @ torch.transpose(_x1, 0, 1), 0, 1)
+    R2 = R_rel @ R1
+
+    p1_ = torch.transpose(torch.inverse(R1) @ torch.inverse(Ks[0]) @ torch.transpose(_x1, 0, 1), 0, 1)
     #p1 = torch.transpose(torch.inverse(Ks[0]) @ torch.transpose(_x1, 0, 1), 0, 1)
-    p2_ = torch.transpose(torch.inverse(Rs[1]) @ torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
+    p2_ = torch.transpose(torch.inverse(R2) @ torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
     #p2 = torch.transpose(torch.inverse(rel_rot) @ torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
     #p2 = torch.transpose(torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
 
     #return torch.abs(p1 @ ts[0] - p2 @ ts[1]).view(-1) / torch.norm(p1, dim=1)
     #return formula(ts[0, :, 0], ts[1, :, 0], p1, p2)
-    return formula(torch.inverse(Rs[0]) @ ts[0, :, 0], torch.inverse(Rs[1]) @ ts[1, :, 0], p1_, p2_)
+    return formula(torch.inverse(R1) @ ts[0, :, 0], torch.inverse(R2) @ ts[1, :, 0], p1_, p2_)

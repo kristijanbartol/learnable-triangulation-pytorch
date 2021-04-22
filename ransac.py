@@ -9,7 +9,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import random
 
 from mvn.utils.multiview import create_fundamental_matrix, IDXS, find_rotation_matrices, compare_rotations, \
-    evaluate_projection, evaluate_reconstruction, distance_between_projections
+    evaluate_projection, evaluate_reconstruction, distance_between_projections, solve_four_solutions
 from mvn.utils.vis import draw_2d_pose_cv2, draw_images, draw_epipolar_lines
 from mvn.utils.img import denormalize_image, image_batch_to_numpy
 
@@ -26,12 +26,13 @@ BBOX_PATH = 'all_bboxes.npy'
 M = 50             # number of frames
 J = 17              # number of joints
 P = M * J           # total number of point correspondences    
-N = 100           # trials
+N = 500           # trials
 eps = 0.75           # outlier probability
 S = 100              # sample size
 #I = (1 - eps) * P  # number of inliers condition
-I = 20
-D = .5              # distance criterion
+I = 0
+D = .3              # distance criterion
+T = 10              # number of top candidates to use
 
 
 if __name__ == '__main__':
@@ -73,59 +74,61 @@ if __name__ == '__main__':
         all_2d_preds = torch.tensor(all_2d_preds, device='cuda', dtype=torch.float32)
 
         ########### GT ###########
-        dists = distance_between_projections(point_corresponds[:, 0], point_corresponds[:, 1], Ks[0], Rs[0], ts[0])
-        condition = dists < 1.
+        R_rel = Rs[0][1] @ torch.inverse(Rs[0][0])
+        dists = distance_between_projections(point_corresponds[:, 0], point_corresponds[:, 1], Ks[0], Rs[0][0], R_rel, ts[0])
+        condition = dists < D
         num_inliers = (condition).sum()
         print(f'Number of inliers (GT): {num_inliers} ({P})')
         print(f'Mean distances between corresponding lines (GT): {dists.mean()}')
 
-        def evaluate(condition):
-            # Evaluate fundamental matrix.
-            #inliers_gt_refine = point_corresponds[condition_gt_initial][:S]
-            inliers = point_corresponds[condition]
-            R_gt1, R_gt2, _ = find_rotation_matrices(inliers, None, Ks)
-            R_sim, m_idx = compare_rotations(Rs, (R_gt1, R_gt2))
+        inliers = point_corresponds[condition]
+        R_gt1, R_gt2, _ = find_rotation_matrices(inliers, None, Ks)
+        R_gt, _ = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_gt1[0], R_gt2[0]))
 
-            kpts_2d_projs, _ = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_gt1[0] if m_idx == 0 else R_gt2[0])
-            error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt1[0] if m_idx == 0 else R_gt2[0])
+        kpts_2d_projs, _ = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_gt)
+        error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt)
 
-            return R_sim, error_3d
-
-        _, error_3d = evaluate(condition)
         print(f'3D error (GT): {error_3d}')
         #####################################################################
 
         counter = 0
-        line_dist_error_pairs = torch.empty((0, 4), device='cuda', dtype=torch.float32)
+        line_dist_error_pairs = torch.empty((0, 8), device='cuda', dtype=torch.float32)
         for i in range(N):
             selected_idxs = torch.tensor(np.random.choice(np.arange(point_corresponds.shape[0]), size=S), device='cuda')
 
             R_initial1, R_initial2, _ = find_rotation_matrices(point_corresponds[selected_idxs], None, Ks)
-            R_sim, m_idx = compare_rotations(Rs, (R_initial1, R_initial2))
-
-            R2_est = ((R_initial1 if m_idx == 0 else R_initial2) @ Rs[0, 0])[0]
+            
+            try:
+                R_initial, _ = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_initial1[0], R_initial2[0]))
+            except:
+                print('Not all positive')
+                R_sim, m_idx = compare_rotations(Rs, (R_initial1, R_initial2))
+                R_initial = R_initial1[0] if m_idx == 0 else R_initial2[0]
 
             line_dists_initial = distance_between_projections(
                     point_corresponds[:, 0], point_corresponds[:, 1], 
-                    Ks[0], torch.stack((Rs[0, 0], R2_est), dim=0), ts[0])
+                    Ks[0], Rs[0, 0], R_initial, ts[0])
 
-            condition_initial = line_dists_initial < 1.
+            condition_initial = line_dists_initial < D
             num_inliers_initial = (condition_initial).sum()
 
             if num_inliers_initial > I:
                 # Evaluate 2D projections and 3D reprojections (triangulation).
-                kpts_2d_projs, error_2d = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_initial1[0] if m_idx == 0 else R_initial2[0])
-                error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_initial1[0] if m_idx == 0 else R_initial2[0])
+                kpts_2d_projs, error_2d = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_initial)
+                error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_initial)
+
+                quaternion = kornia.rotation_matrix_to_quaternion(R_initial)
 
                 line_dists_inlier = distance_between_projections(
                     point_corresponds[condition_initial][:, 0], point_corresponds[condition_initial][:, 1], Ks[0], 
-                    torch.stack((Rs[0, 0], R2_est), dim=0), ts[0])
+                    Rs[0, 0], R_initial, ts[0])
                 line_dists_all = distance_between_projections(
                     point_corresponds[:, 0], point_corresponds[:, 1], Ks[0], 
-                    torch.stack((Rs[0, 0], R2_est), dim=0), ts[0])
+                    Rs[0, 0], R_initial, ts[0])
                 
                 line_dist_error_pair = torch.unsqueeze(torch.cat(
-                    (torch.unsqueeze(num_inliers_initial, dim=0), 
+                    (quaternion,
+                    torch.unsqueeze(num_inliers_initial, dim=0), 
                     torch.unsqueeze(line_dists_inlier.mean(), dim=0), 
                     torch.unsqueeze(line_dists_all.mean(), dim=0),
                     torch.unsqueeze(error_3d, dim=0)), dim=0), dim=0)
@@ -135,48 +138,40 @@ if __name__ == '__main__':
 
                 counter += 1
 
-        print(f'Estimated best (num inliers): {line_dist_error_pairs[line_dist_error_pairs[:, 0].argmax()]}')
-        print(f'Estimated best (inlier distances): {line_dist_error_pairs[line_dist_error_pairs[:, 1].argmin()]}')
-        print(f'Estimated best (all distances): {line_dist_error_pairs[line_dist_error_pairs[:, 2].argmin()]}')
-        print(f'Actual best: {line_dist_error_pairs[line_dist_error_pairs[:, 3].argmin()]}')
+        
+        def evaluate_top_candidates(quaternions, Ks, Rs, ts, point_corresponds):
+            quaternion = torch.mean(quaternions, dim=0)
+            R_rel = kornia.quaternion_to_rotation_matrix(quaternion)
+            line_dists = distance_between_projections(
+                    point_corresponds[:, 0], point_corresponds[:, 1], 
+                    Ks[0], Rs[0, 0], R_rel, ts[0])
+            return line_dists.mean()
 
-        '''
-        quat_error_pairs_np = quat_error_pairs.cpu().numpy()
-        np.save('quat_error_pairs.npy', quat_error_pairs_np)
 
-        quat_error_median = np.median(quat_error_pairs_np[:, :4], axis=0)
-        median_idx = np.linalg.norm(quat_error_pairs_np[:, :4] - quat_error_median, axis=1).argmin()
-        print(median_idx)
-        print(quat_error_pairs_np[median_idx])
+        line_dist_error_pairs_np = line_dist_error_pairs.cpu().numpy()
+        top_all_dists = np.array(sorted(line_dist_error_pairs_np, key=lambda x: x[6]))[:T]
+        top_num_inliers = np.array(sorted(line_dist_error_pairs_np, key=lambda x: x[4]))[:T]
 
-        quat_error_mean = np.mean(quat_error_pairs_np[:, :4], axis=0)
-        mean_idx = np.linalg.norm(quat_error_pairs_np[:, :4] - quat_error_mean, axis=1).argmin()
-        print(mean_idx)
-        print(quat_error_pairs_np[mean_idx])
+        top_num_inliers_error = evaluate_top_candidates(
+            torch.tensor(top_num_inliers[:, :4], device='cuda', dtype=torch.float32), Ks, Rs, ts, point_corresponds)
+        top_all_dists_error = evaluate_top_candidates(
+            torch.tensor(top_all_dists[:, :4], device='cuda', dtype=torch.float32), Ks, Rs, ts, point_corresponds)
 
-        camera_inliers = quat_error_pairs_np[:, 4] < 20.
-        combinations2d = list(itertools.combinations(range(4), 2))
+        print(f'Estimated best (num inliers): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 4].argmax()][[4, 6, 7]]}')
+        print(f'Estimated best (inlier distances): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 5].argmin()][[5, 7]]}')
+        print(f'Estimated best (all distances): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 6].argmin()][[4, 6, 7]]}')
 
-        for idx1, idx2 in combinations2d:
+        print(f'Error (num inliers top): {top_num_inliers_error}')
+        print(f'Error (all distances top): {top_all_dists_error}')
+
+        print(f'Best found: {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 4:].argmin()]}')
+
+        camera_inliers = line_dist_error_pairs_np[:, 3] < 10.
+
+        for idx in range(line_dist_error_pairs_np.shape[1] - 1):
             plt.clf()
-            plt.scatter(quat_error_pairs_np[~camera_inliers, idx1], quat_error_pairs_np[~camera_inliers, idx2], c='blue')
-            plt.scatter(quat_error_pairs_np[camera_inliers, idx1], quat_error_pairs_np[camera_inliers, idx2], c='red')
-            plt.scatter(quat_error_pairs_np[median_idx, idx1], quat_error_pairs_np[median_idx, idx2], c='green')
-            plt.scatter(quat_error_pairs_np[mean_idx, idx1], quat_error_pairs_np[mean_idx, idx2], c='yellow')
-            plt.savefig(f'quat_distro_{idx1}{idx2}.png')
-
-        combinations3d = list(itertools.combinations(range(4), 3))
-
-        fig = plt.figure()
-        ax = Axes3D(fig)
-
-        for idx1, idx2, idx3 in combinations3d:
-            ax.cla()
-            ax.scatter(quat_error_pairs_np[~camera_inliers, idx1], quat_error_pairs_np[~camera_inliers, idx2], \
-                quat_error_pairs_np[~camera_inliers, idx3], c='blue')
-            ax.scatter(quat_error_pairs_np[camera_inliers, idx1], quat_error_pairs_np[camera_inliers, idx2], \
-                quat_error_pairs_np[camera_inliers, idx3], c='red')
-            plt.savefig(f'quat_distro_{idx1}{idx2}{idx3}.png')
+            plt.scatter(line_dist_error_pairs_np[~camera_inliers, idx], line_dist_error_pairs_np[~camera_inliers, 3], c='blue')
+            plt.scatter(line_dist_error_pairs_np[camera_inliers, idx], line_dist_error_pairs_np[camera_inliers, 3], c='red')
+            plt.savefig(f'quat_distro_{idx}.png')
 
         print(f'Number of camera inliers (total): {np.sum(camera_inliers)}')
-        '''
