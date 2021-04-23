@@ -26,7 +26,7 @@ BBOX_PATH = 'all_bboxes.npy'
 M = 50             # number of frames
 J = 17              # number of joints
 P = M * J           # total number of point correspondences    
-N = 500           # trials
+N = 100           # trials
 eps = 0.75           # outlier probability
 S = 100              # sample size
 #I = (1 - eps) * P  # number of inliers condition
@@ -36,13 +36,9 @@ T = 10              # number of top candidates to use
 
 
 if __name__ == '__main__':
-    print(f'Number of inliers condition: {I} ({P})')
-
     with torch.no_grad():
-        #all_images = np.load(IMGS_PATH)[:M]
         all_2d_preds = np.load(PRED_PATH)
         all_3d_gt = torch.tensor(np.load(GT_PATH), device='cuda', dtype=torch.float32)
-        #Ks_bboxed = torch.tensor(np.load(KS_BBOX_PATH), device='cuda', dtype=torch.float32)
         Ks = torch.unsqueeze(torch.tensor(np.load(K_PATH), device='cuda', dtype=torch.float32), dim=0)[:, IDXS]
         Rs = torch.unsqueeze(torch.tensor(np.load(R_PATH), device='cuda', dtype=torch.float32), dim=0)[:, IDXS]
         ts = torch.unsqueeze(torch.tensor(np.load(T_PATH), device='cuda', dtype=torch.float32), dim=0)[:, IDXS]
@@ -51,18 +47,9 @@ if __name__ == '__main__':
         frame_selection = np.random.choice(np.arange(all_2d_preds.shape[0]), size=M)
         all_2d_preds = all_2d_preds[frame_selection][:, IDXS]
         all_3d_gt = all_3d_gt[frame_selection]
-        #Ks_bboxed = Ks_bboxed[frame_selection]
         bboxes = bboxes[frame_selection][:, IDXS]
 
-        #all_right_imgs = image_batch_to_numpy(all_images[:, 1])
-        #img = denormalize_image(all_right_imgs[0]).astype(np.uint8)
-        #img = img[..., ::-1]  # bgr -> rgb
-
-        #all_2d_preds_bboxed = torch.tensor(all_2d_preds, device='cuda', dtype=torch.float32)
-
         # Unbbox keypoints.
-        # TODO: Update magic number 384.
-        # TODO: Write in Torch.
         bbox_height = np.abs(bboxes[:, :, 0, 0] - bboxes[:, :, 1, 0])
         all_2d_preds *= np.expand_dims(np.expand_dims(bbox_height / 384., axis=-1), axis=-1)
         all_2d_preds += np.expand_dims(bboxes[:, :, 0, :], axis=2)
@@ -92,7 +79,7 @@ if __name__ == '__main__':
         #####################################################################
 
         counter = 0
-        line_dist_error_pairs = torch.empty((0, 8), device='cuda', dtype=torch.float32)
+        line_dist_error_pairs = torch.empty((0, 7), device='cuda', dtype=torch.float32)
         for i in range(N):
             selected_idxs = torch.tensor(np.random.choice(np.arange(point_corresponds.shape[0]), size=S), device='cuda')
 
@@ -101,6 +88,7 @@ if __name__ == '__main__':
             try:
                 R_initial, _ = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_initial1[0], R_initial2[0]))
             except:
+                # TODO: It's probably OK to just skip these samples.
                 print('Not all positive')
                 R_sim, m_idx = compare_rotations(Rs, (R_initial1, R_initial2))
                 R_initial = R_initial1[0] if m_idx == 0 else R_initial2[0]
@@ -129,11 +117,9 @@ if __name__ == '__main__':
                 line_dist_error_pair = torch.unsqueeze(torch.cat(
                     (quaternion,
                     torch.unsqueeze(num_inliers_initial, dim=0), 
-                    torch.unsqueeze(line_dists_inlier.mean(), dim=0), 
                     torch.unsqueeze(line_dists_all.mean(), dim=0),
                     torch.unsqueeze(error_3d, dim=0)), dim=0), dim=0)
                 line_dist_error_pairs = torch.cat((line_dist_error_pairs, line_dist_error_pair), dim=0)
-                #print(f'{counter}. ({quaternion} -> ({line_dists_inlier.mean():.3f}, {R_sim:.2f}, {error_3d:.2f})')
                 print(f'{counter}. ({num_inliers_initial}, {line_dists_inlier.mean():.3f}, {line_dists_all.mean():.3f}) -> {error_3d:.2f}')
 
                 counter += 1
@@ -157,14 +143,13 @@ if __name__ == '__main__':
         top_all_dists_error = evaluate_top_candidates(
             torch.tensor(top_all_dists[:, :4], device='cuda', dtype=torch.float32), Ks, Rs, ts, point_corresponds)
 
-        print(f'Estimated best (num inliers): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 4].argmax()][[4, 6, 7]]}')
-        print(f'Estimated best (inlier distances): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 5].argmin()][[5, 7]]}')
-        print(f'Estimated best (all distances): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 6].argmin()][[4, 6, 7]]}')
+        print(f'Estimated best (num inliers): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 4].argmax()][[4, 5, 6]]}')
+        print(f'Estimated best (all distances): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 6].argmin()][[4, 5, 6]]}')
 
         print(f'Error (num inliers top): {top_num_inliers_error}')
         print(f'Error (all distances top): {top_all_dists_error}')
 
-        print(f'Best found: {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 4:].argmin()]}')
+        print(f'Best found: {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 6:].argmin()][4:]}')
 
         camera_inliers = line_dist_error_pairs_np[:, 3] < 10.
 
@@ -173,5 +158,3 @@ if __name__ == '__main__':
             plt.scatter(line_dist_error_pairs_np[~camera_inliers, idx], line_dist_error_pairs_np[~camera_inliers, 3], c='blue')
             plt.scatter(line_dist_error_pairs_np[camera_inliers, idx], line_dist_error_pairs_np[camera_inliers, 3], c='red')
             plt.savefig(f'quat_distro_{idx}.png')
-
-        print(f'Number of camera inliers (total): {np.sum(camera_inliers)}')

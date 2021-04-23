@@ -301,6 +301,7 @@ def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cand, t_cand=(None, No
     candidate_tuples = [(R_cand[0], t_cand[0]), (R_cand[0], t_cand[1]), (R_cand[1], t_cand[0]), (R_cand[1], t_cand[1])]
     sign_outcomes = []
     sign_condition = lambda x: torch.all(x[:, 2] > 0.)
+    # TODO: Speed up.
     for Rt in candidate_tuples:
         R_rel_est = Rt[0]
         R2_est = R_rel_est @ R1
@@ -309,9 +310,7 @@ def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cand, t_cand=(None, No
 
         extr2_est = torch.cat((R2_est, t2), dim=1)
 
-        #P1 = torch.unsqueeze(K1 @ extr1, dim=0)
         P1 = K1 @ extr1
-        #P2_est = torch.unsqueeze(K2 @ extr2_est, dim=0)
         P2_est = K2 @ extr2_est
 
         kpts_3d_est = kornia.geometry.triangulate_points(
