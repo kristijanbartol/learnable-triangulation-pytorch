@@ -26,13 +26,13 @@ BBOX_PATH = 'all_bboxes.npy'
 M = 50             # number of frames
 J = 17              # number of joints
 P = M * J           # total number of point correspondences    
-N = 100           # trials
+N = 200           # trials
 eps = 0.75           # outlier probability
 S = 100              # sample size
 #I = (1 - eps) * P  # number of inliers condition
 I = 0
 D = .3              # distance criterion
-T = 10              # number of top candidates to use
+T = int(N/20)              # number of top candidates to use
 
 
 if __name__ == '__main__':
@@ -43,6 +43,9 @@ if __name__ == '__main__':
         Rs = torch.unsqueeze(torch.tensor(np.load(R_PATH), device='cuda', dtype=torch.float32), dim=0)[:, IDXS]
         ts = torch.unsqueeze(torch.tensor(np.load(T_PATH), device='cuda', dtype=torch.float32), dim=0)[:, IDXS]
         bboxes = np.load(BBOX_PATH)
+
+        #Ks[0][0][0][0] *= 1.2
+        #Ks[0][0][1][1] /= 1.2
 
         frame_selection = np.random.choice(np.arange(all_2d_preds.shape[0]), size=M)
         all_2d_preds = all_2d_preds[frame_selection][:, IDXS]
@@ -68,14 +71,17 @@ if __name__ == '__main__':
         print(f'Number of inliers (GT): {num_inliers} ({P})')
         print(f'Mean distances between corresponding lines (GT): {dists.mean()}')
 
-        inliers = point_corresponds[condition]
-        R_gt1, R_gt2, _ = find_rotation_matrices(inliers, None, Ks)
-        R_gt, _ = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_gt1[0], R_gt2[0]))
+        try:
+            inliers = point_corresponds[condition]
+            R_gt1, R_gt2, _ = find_rotation_matrices(inliers, None, Ks)
+            R_gt, _ = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_gt1[0], R_gt2[0]))
 
-        kpts_2d_projs, _ = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_gt)
-        error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt)
+            kpts_2d_projs, _ = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_gt)
+            error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt)
 
-        print(f'3D error (GT): {error_3d}')
+            print(f'3D error (GT): {error_3d}')
+        except:
+            print('NOTE: GT exception! This should only happen when something is purposely broken...')
         #####################################################################
 
         counter = 0
@@ -128,15 +134,18 @@ if __name__ == '__main__':
         def evaluate_top_candidates(quaternions, Ks, Rs, ts, point_corresponds):
             quaternion = torch.mean(quaternions, dim=0)
             R_rel = kornia.quaternion_to_rotation_matrix(quaternion)
-            line_dists = distance_between_projections(
-                    point_corresponds[:, 0], point_corresponds[:, 1], 
-                    Ks[0], Rs[0, 0], R_rel, ts[0])
-            return line_dists.mean()
+            #line_dists = distance_between_projections(
+            #        point_corresponds[:, 0], point_corresponds[:, 1], 
+            #        Ks[0], Rs[0, 0], R_rel, ts[0])
+            
+            kpts_2d_projs, error_2d = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_rel)
+            error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_rel)
+            return error_3d
 
 
         line_dist_error_pairs_np = line_dist_error_pairs.cpu().numpy()
-        top_all_dists = np.array(sorted(line_dist_error_pairs_np, key=lambda x: x[6]))[:T]
         top_num_inliers = np.array(sorted(line_dist_error_pairs_np, key=lambda x: x[4]))[:T]
+        top_all_dists = np.array(sorted(line_dist_error_pairs_np, key=lambda x: x[5]))[:T]
 
         top_num_inliers_error = evaluate_top_candidates(
             torch.tensor(top_num_inliers[:, :4], device='cuda', dtype=torch.float32), Ks, Rs, ts, point_corresponds)
@@ -144,7 +153,7 @@ if __name__ == '__main__':
             torch.tensor(top_all_dists[:, :4], device='cuda', dtype=torch.float32), Ks, Rs, ts, point_corresponds)
 
         print(f'Estimated best (num inliers): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 4].argmax()][[4, 5, 6]]}')
-        print(f'Estimated best (all distances): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 6].argmin()][[4, 5, 6]]}')
+        print(f'Estimated best (all distances): {line_dist_error_pairs_np[line_dist_error_pairs_np[:, 5].argmin()][[4, 5, 6]]}')
 
         print(f'Error (num inliers top): {top_num_inliers_error}')
         print(f'Error (all distances top): {top_all_dists_error}')
