@@ -8,5 +8,5 @@ fi
 
 echo ${REPO_DIR}
 
-docker run --rm --gpus all --name kbartol-triangulation -it \
-		-v ${REPO_DIR}:/learnable-triangulation/ learnable-triangulation
+docker run --rm --gpus all --name kbartol-learnable -it \
+		-v ${REPO_DIR}:/learnable-triangulation/ kbartol-learnable
