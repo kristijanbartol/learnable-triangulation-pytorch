@@ -167,6 +167,8 @@ class Human36MMultiViewDataset(Dataset):
             sample['cameras'].append(retval_camera)
             sample['proj_matrices'].append(retval_camera.projection)
 
+            sample['bbox'].append(bbox)
+
         # 3D keypoints
         # add dummy confidences
         sample['keypoints_3d'] = np.pad(

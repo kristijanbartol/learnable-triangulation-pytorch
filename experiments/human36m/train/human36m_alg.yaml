@@ -19,6 +19,9 @@ opt:
 
   scale_keypoints_3d: 0.1
 
+  autocalibration: true
+  num_acc_grad: 50
+
 model:
   name: "alg"
 
