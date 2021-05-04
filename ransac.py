@@ -76,8 +76,8 @@ if __name__ == '__main__':
 
         try:
             inliers = point_corresponds[condition]
-            R_gt1, R_gt2, _ = find_rotation_matrices(inliers, None, Ks)
-            R_gt, _ = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_gt1[0], R_gt2[0]))
+            R_gt1, R_gt2, t = find_rotation_matrices(inliers, None, Ks)
+            R_gt, _ = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_gt1[0], R_gt2[0]), None)
 
             kpts_2d_projs, _ = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_gt)
             error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt)

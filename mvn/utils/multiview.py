@@ -225,7 +225,7 @@ def find_rotation_matrices(points, alg_confidences, Ks, device='cuda'):
     E = kornia.essential_from_fundamental(F, K1, K2)
     R1, R2, t = kornia.decompose_essential_matrix(E)
 
-    return R1, R2, F
+    return R1, R2, t
 
 
 def compare_rotations(R_matrices, est_proj_matrices):
@@ -244,7 +244,8 @@ def compare_rotations(R_matrices, est_proj_matrices):
     return min(diff1, diff2), np.argmin([diff1, diff2])
 
 
-def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cand, t_cand=(None, None)):
+def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cands, t_cand=None):
+    # NOTE: Currently solving 2 solutions.
     K1 = Ks[0]
     K2 = Ks[1]
 
@@ -254,7 +255,7 @@ def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cand, t_cand=(None, No
 
     extr1 = torch.cat((R1, t1), dim=1)
 
-    candidate_tuples = [(R_cand[0], t_cand[0]), (R_cand[0], t_cand[1]), (R_cand[1], t_cand[0]), (R_cand[1], t_cand[1])]
+    candidate_tuples = [(R_cand[0], t_cand), (R_cand[1], t_cand)]
     sign_outcomes = []
     sign_condition = lambda x: torch.all(x[:, 2] > 0.)
     # TODO: Speed up.

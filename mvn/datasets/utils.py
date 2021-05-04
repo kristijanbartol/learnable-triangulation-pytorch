@@ -35,6 +35,8 @@ def make_collate_fn(randomize_n_views=True, min_n_views=10, max_n_views=31):
 
         batch['bbox'] = np.array([[ [[item['bbox'][i][0], item['bbox'][i][1]], [item['bbox'][i][2], item['bbox'][i][3]]] for item in items] for i in indexes], dtype=np.float32).swapaxes(0, 1)
 
+        batch['subject_idx'] = [item['subject_idx'] for item in items]
+
         # TODO: This is probably why it all became slower in the other branch.
         '''
         try:
@@ -96,4 +98,6 @@ def prepare_batch(batch, device, config, is_train=True):
     bbox_batch = torch.stack([torch.from_numpy(bbox_batch) for bbox_batch in batch['bbox']], dim=0)  # shape (batch_size, n_views, bbox_h, bbox_w)
     bbox_batch = bbox_batch.float().to(device)
 
-    return images_batch, keypoints_3d_batch_gt, keypoints_3d_validity_batch_gt, proj_matricies_batch, Ks, K_batch, Rs, ts, bbox_batch
+    subject_idx = batch['subject_idx'][0]       # NOTE: Works only for batch_size=1
+
+    return images_batch, keypoints_3d_batch_gt, keypoints_3d_validity_batch_gt, proj_matricies_batch, Ks, K_batch, Rs, ts, bbox_batch, subject_idx

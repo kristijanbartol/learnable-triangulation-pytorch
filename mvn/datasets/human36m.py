@@ -183,6 +183,7 @@ class Human36MMultiViewDataset(Dataset):
 
         # save sample's index
         sample['indexes'] = idx
+        sample['subject_idx'] = subject
 
         if self.keypoints_3d_pred is not None:
             sample['pred_keypoints_3d'] = self.keypoints_3d_pred[idx]
