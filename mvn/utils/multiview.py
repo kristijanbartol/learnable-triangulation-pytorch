@@ -255,17 +255,20 @@ def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cands, t_cand=None):
 
     extr1 = torch.cat((R1, t1), dim=1)
 
-    candidate_tuples = [(R_cand[0], t_cand), (R_cand[1], t_cand)]
+    if t_cand is not None:
+        candidate_tuples = [(R_cands[0], t_cand), (R_cands[0], -t_cand), (R_cands[1], t_cand), (R_cands[1], -t_cand)]
+    else:
+        candidate_tuples = [(R_cands[0], ts[1]), (R_cands[1], ts[1])]
+
     sign_outcomes = []
     sign_condition = lambda x: torch.all(x[:, 2] > 0.)
+
     # TODO: Speed up.
     for Rt in candidate_tuples:
         R_rel_est = Rt[0]
         R2_est = R_rel_est @ R1
 
-        t2 = ts[1] if Rt[1] is None else Rt[1]
-
-        extr2_est = torch.cat((R2_est, t2), dim=1)
+        extr2_est = torch.cat((R2_est, Rt[1]), dim=1)
 
         P1 = K1 @ extr1
         P2_est = K2 @ extr2_est

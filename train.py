@@ -165,6 +165,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
     all_bboxes = torch.empty((0, 4, 2, 2), device='cuda', dtype=torch.float32)
 
     current_subject_idx = 'S1'
+    camera_params_saved = False
 
     is_train = False
 
@@ -300,26 +301,11 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
 
                 # plot visualization
                 if master:
+
                     if n_iters_total % config.vis_freq == 0:# or total_l2.item() > 500.0:
                         vis_kind = config.kind
                         if (config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False):
                             vis_kind = "coco"
-
-                        all_2d_preds = torch.cat((all_2d_preds, keypoints_2d_pred), dim=0)
-                        all_3d_gt = torch.cat((all_3d_gt, keypoints_3d_gt), dim=0)
-                        Ks_bboxed = torch.cat((Ks_bboxed, K_bboxed), dim=0)
-                        all_bboxes = torch.cat((all_bboxes, bbox_batch), dim=0)
-
-                        save_dir = os.path.join('results/', subject_idx)
-                        if not os.path.exists(save_dir):
-                            os.makedirs(save_dir)
-
-                        if not os.path.exists(os.path.join(save_dir, 'Ks.npy')):
-                            np.save(os.path.join(save_dir, 'Ks.npy'), Ks.cpu().numpy())
-                        if not os.path.exists(os.path.join(save_dir,'Rs.npy')):
-                            np.save(os.path.join(save_dir,'Rs.npy'), Rs.cpu().numpy())
-                        if not os.path.exists(os.path.join(save_dir,'ts.npy')):
-                            np.save(os.path.join(save_dir,'ts.npy'), ts.cpu().numpy())
 
                         '''
                         for batch_i in range(min(batch_size, config.vis_n_elements)):
@@ -383,9 +369,9 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
                     n_iters_total += 1
                     print(n_iters_total, subject_idx)
 
-                if subject_idx != current_subject_idx:
-                    current_subject_idx = subject_idx
 
+                if subject_idx != current_subject_idx:
+                    print(f'Saving data for {subject_idx}...')
                     all_2d_preds = all_2d_preds.cpu().numpy()
                     np.save(os.path.join(save_dir, 'all_2d_preds.npy'), all_2d_preds)
 
@@ -402,6 +388,25 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
                     all_3d_gt = torch.empty((0, 17, 3), device='cuda', dtype=torch.float32)
                     Ks_bboxed = torch.empty((0, 4, 3, 3), device='cuda', dtype=torch.float32)
                     all_bboxes = torch.empty((0, 4, 2, 2), device='cuda', dtype=torch.float32)
+
+                    current_subject_idx = subject_idx
+                    camera_params_saved = False
+                else:
+                    if not camera_params_saved:
+                        save_dir = os.path.join('results/', subject_idx)
+                        if not os.path.exists(save_dir):
+                            os.makedirs(save_dir)
+
+                        print(f'Saving camera parameters for {subject_idx}...')
+                        np.save(os.path.join(save_dir, 'Ks.npy'), Ks.cpu().numpy())
+                        np.save(os.path.join(save_dir,'Rs.npy'), Rs.cpu().numpy())
+                        np.save(os.path.join(save_dir,'ts.npy'), ts.cpu().numpy())
+                        camera_params_saved = True
+
+                all_2d_preds = torch.cat((all_2d_preds, keypoints_2d_pred), dim=0)
+                all_3d_gt = torch.cat((all_3d_gt, keypoints_3d_gt), dim=0)
+                Ks_bboxed = torch.cat((Ks_bboxed, K_bboxed), dim=0)
+                all_bboxes = torch.cat((all_bboxes, bbox_batch), dim=0)
 
     '''
     # calculate evaluation metrics
