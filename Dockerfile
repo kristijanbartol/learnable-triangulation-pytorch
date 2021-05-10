@@ -55,6 +55,7 @@ RUN python3.7 -m pip install \
 	tensorboard \
 	kornia \
 	h5py==2.10.0 \
+	mayavi \
 	poseval@git+https://github.com/svenkreiss/poseval.git
 #RUN python3.7 -m pip install --no-cache-dir -e .
 WORKDIR /learnable-triangulation

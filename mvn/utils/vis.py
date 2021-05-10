@@ -9,7 +9,7 @@ import kornia
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pylab as plt
-from mpl_toolkits.mplot3d import axes3d, Axes3D
+from mpl_toolkits import mplot3d
 import PIL
 
 
@@ -587,3 +587,14 @@ def draw_voxels(voxels, ax, shape=(8, 8, 8), norm=True, alpha=0.1):
 
     ax.set_xlabel("z"); ax.set_ylabel("x"); ax.set_zlabel("y")
     ax.invert_xaxis(); ax.invert_zaxis()
+
+
+def draw_cameras_and_pose(pose_3d, K1, R1, t1, K2, R2, t2):
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')
+
+    pose_3d_np = pose_3d.cpu().numpy()
+
+    ax.scatter3D(pose_3d_np[:, 0], pose_3d_np[:, 1], pose_3d_np[:, 2], c=pose_3d_np[:, 2], cmap='Greens')
+
+    return fig

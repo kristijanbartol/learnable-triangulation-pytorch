@@ -245,7 +245,6 @@ def compare_rotations(R_matrices, est_proj_matrices):
 
 
 def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cands, t_cand=None):
-    # NOTE: Currently solving 2 solutions.
     K1 = Ks[0]
     K2 = Ks[1]
 
@@ -258,7 +257,7 @@ def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cands, t_cand=None):
     if t_cand is not None:
         candidate_tuples = [(R_cands[0], t_cand), (R_cands[0], -t_cand), (R_cands[1], t_cand), (R_cands[1], -t_cand)]
     else:
-        candidate_tuples = [(R_cands[0], ts[1]), (R_cands[1], ts[1])]
+        candidate_tuples = [(R_cands[0], ts[1]), (R_cands[0], -ts[1]), (R_cands[1], ts[1]), (R_cands[1], -ts[1])]
 
     sign_outcomes = []
     sign_condition = lambda x: torch.all(x[:, 2] > 0.)
@@ -329,7 +328,7 @@ def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est, device='cuda'):
 
     error_2d = torch.mean(torch.norm(kpts_2d_gt2 - kpts_2d_est, dim=2))
 
-    return torch.stack((kpts_2d_gt1, kpts_2d_gt2, kpts_2d_est), dim=0), error_2d
+    return torch.stack((kpts_2d_gt1, kpts_2d_gt2), dim=0), error_2d
 
 
 def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
@@ -353,12 +352,10 @@ def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
 
     kpts_2d_gt1 = kpts_2d[0]
     kpts_2d_gt2 = kpts_2d[1]
-    kpts_2d_est = kpts_2d[2]     # NOTE: not used.
 
-    #kpts_3d_gt_reproj = kornia.geometry.triangulate_points(P1, P2, kpts_2d_gt1, kpts_2d_gt2)
     kpts_3d_est = kornia.geometry.triangulate_points(P1, P2_est, kpts_2d_gt1, kpts_2d_gt2)
 
-    return torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=2))
+    return torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=2)), kpts_3d_est
 
 
 def formula(P1, P2, V1, V2):
@@ -388,16 +385,9 @@ def distance_between_projections(x1, x2, Ks, R1, R_rel, ts, device='cuda'):
     _x1 = torch.cat((x1, torch.ones((x1.shape[0], 1), device=device)), dim=1)
     _x2 = torch.cat((x2, torch.ones((x2.shape[0], 1), device=device)), dim=1)
 
-    #rel_rot = Rs[1] @ torch.inverse(Rs[0])
-
     R2 = R_rel @ R1
 
     p1_ = torch.transpose(torch.inverse(R1) @ torch.inverse(Ks[0]) @ torch.transpose(_x1, 0, 1), 0, 1)
-    #p1 = torch.transpose(torch.inverse(Ks[0]) @ torch.transpose(_x1, 0, 1), 0, 1)
     p2_ = torch.transpose(torch.inverse(R2) @ torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
-    #p2 = torch.transpose(torch.inverse(rel_rot) @ torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
-    #p2 = torch.transpose(torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
 
-    #return torch.abs(p1 @ ts[0] - p2 @ ts[1]).view(-1) / torch.norm(p1, dim=1)
-    #return formula(ts[0, :, 0], ts[1, :, 0], p1, p2)
     return formula(torch.inverse(R1) @ ts[0, :, 0], torch.inverse(R2) @ ts[1, :, 0], p1_, p2_)

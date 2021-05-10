@@ -11,7 +11,7 @@ import os
 
 from mvn.utils.multiview import create_fundamental_matrix, IDXS, find_rotation_matrices, compare_rotations, \
     evaluate_projection, evaluate_reconstruction, distance_between_projections, solve_four_solutions
-from mvn.utils.vis import draw_2d_pose_cv2, draw_images, draw_epipolar_lines
+from mvn.utils.vis import draw_2d_pose_cv2, draw_images, draw_epipolar_lines, draw_cameras_and_pose
 from mvn.utils.img import denormalize_image, image_batch_to_numpy
 
 
@@ -34,7 +34,7 @@ eps = 0.75           # outlier probability
 S = 100              # sample size
 #I = (1 - eps) * P  # number of inliers condition
 I = 0
-D = 1.              # distance criterion
+D = .3             # distance criterion
 T = int(N/20)              # number of top candidates to use
 
 
@@ -67,10 +67,9 @@ if __name__ == '__main__':
 
         all_2d_preds = torch.tensor(all_2d_preds, device='cuda', dtype=torch.float32)
 
-        R_rel_gt = Rs[0][1] @ torch.inverse(Rs[0][0])
-
         ########### GT data + GT camera params ############
-        (kpts1_gt, kpts2_gt, _), _ = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_rel_gt)
+        R_rel_gt = Rs[0][1] @ torch.inverse(Rs[0][0])
+        (kpts1_gt, kpts2_gt), _ = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_rel_gt)
         kpts1_gt = kpts1_gt.reshape((-1, 2))
         kpts2_gt = kpts2_gt.reshape((-1, 2))
 
@@ -79,21 +78,20 @@ if __name__ == '__main__':
         dists = distance_between_projections(kpts1_gt, kpts2_gt, Ks[0], Rs[0][0], R_rel_gt, ts[0])
         condition = dists < D
         num_inliers = (condition).sum()
-        #print(f'Number of inliers (GT): {num_inliers} ({P})')
-        #print(f'Mean distances between corresponding lines (GT): {dists.mean()}')
+
+        print(f'Mean distances between corresponding lines (GT all): {dists.mean()}')
 
         assert(num_inliers == point_corresponds.shape[0])
 
         inliers = torch.stack((kpts1_gt, kpts2_gt), dim=1)[condition]
         R_gt1, R_gt2, t = find_rotation_matrices(inliers, None, Ks)
 
-        #scale = calculate_scale(kpts1_gt)
         scale = (t_rel_gt / t[0]).mean()
-        t_scaled = t * scale
-        R_gt, t = solve_four_solutions(inliers, Ks[0], Rs[0], ts[0], (R_gt1[0], R_gt2[0]), t_scaled[0])
+        t = t * scale
+        R_gt, t = solve_four_solutions(inliers, Ks[0], Rs[0], ts[0], (R_gt1[0], R_gt2[0]), None)
 
         kpts_2d_projs, _ = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_gt)
-        error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt)
+        error_3d, _ = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt)
         
         print(f'3D error (GT): {error_3d}')
         ###################################################
@@ -109,13 +107,36 @@ if __name__ == '__main__':
         inliers = point_corresponds[condition]
         R_gt1, R_gt2, t = find_rotation_matrices(inliers, None, Ks)
         t_scaled = t * scale
-        R_gt, t = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_gt1[0], R_gt2[0]), t_scaled[0])
+        R_gt, t = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_gt1[0], R_gt2[0]), None)
 
         kpts_2d_projs, _ = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_gt)
-        error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt)
+        error_3d, kpts_3d_est = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt)
 
         print(f'3D error (GT): {error_3d}')
         ##########################
+
+
+        ########### Autocalibration using triangulated points ###########
+        kpts_2d_projs, _ = evaluate_projection(kpts_3d_est, Ks[0], Rs[0], ts[0], R_gt)
+        kpts_2d_projs = kpts_2d_projs.reshape(2, -1, 2).transpose(0, 1)
+
+        dists = distance_between_projections(kpts_2d_projs[:, 0], kpts_2d_projs[:, 1], Ks[0], Rs[0][0], R_rel_gt, ts[0])
+        condition = dists < D
+        num_inliers = (condition).sum()
+
+        assert(num_inliers == point_corresponds.shape[0])
+
+        R_gt1, R_gt2, t = find_rotation_matrices(kpts_2d_projs, None, Ks)
+
+        scale = (t_rel_gt / t[0]).mean()
+        t = t * scale
+        R_gt, t = solve_four_solutions(inliers, Ks[0], Rs[0], ts[0], (R_gt1[0], R_gt2[0]), None)
+
+        kpts_2d_projs, _ = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_gt)
+        error_3d, _ = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_gt)
+
+        print(f'3D error (zero distances): {error_3d}')
+        #################################################################
 
         counter = 0
         line_dist_error_pairs = torch.empty((0, 7), device='cuda', dtype=torch.float32)
@@ -125,13 +146,18 @@ if __name__ == '__main__':
             R_initial1, R_initial2, t = find_rotation_matrices(point_corresponds[selected_idxs], None, Ks)
             
             try:
-                t_scaled = t * scale
-                R_initial, _ = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_initial1[0], R_initial2[0]), t_scaled[0])
+                t = t * scale
+                R_initial, t = solve_four_solutions(point_corresponds, Ks[0], Rs[0], ts[0], (R_initial1[0], R_initial2[0]), t[0])
             except Exception as ex:
                 print(ex)
                 # TODO: It's probably OK to just skip these samples.
                 R_sim, m_idx = compare_rotations(Rs, (R_initial1, R_initial2))
                 R_initial = R_initial1[0] if m_idx == 0 else R_initial2[0]
+                print('Not all positive')
+                continue
+
+            #t_rel = -R_initial @ ts[0][0] + t
+            #ts_est = torch.stack((ts[0][0], t_rel), axis=0)
 
             line_dists_initial = distance_between_projections(
                     point_corresponds[:, 0], point_corresponds[:, 1], 
@@ -168,9 +194,6 @@ if __name__ == '__main__':
         def evaluate_top_candidates(quaternions, Ks, Rs, ts, point_corresponds):
             quaternion = torch.mean(quaternions, dim=0)
             R_rel = kornia.quaternion_to_rotation_matrix(quaternion)
-            #line_dists = distance_between_projections(
-            #        point_corresponds[:, 0], point_corresponds[:, 1], 
-            #        Ks[0], Rs[0, 0], R_rel, ts[0])
             
             kpts_2d_projs, error_2d = evaluate_projection(all_3d_gt, Ks[0], Rs[0], ts[0], R_rel)
             error_3d = evaluate_reconstruction(all_3d_gt, kpts_2d_projs, Ks[0], Rs[0], ts[0], R_rel)
