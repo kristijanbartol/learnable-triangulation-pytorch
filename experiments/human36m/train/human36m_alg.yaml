@@ -6,7 +6,7 @@ vis_n_elements: 10
 image_shape: [384, 384]
 
 opt:
-  criterion: "MSESmooth"
+  criterion: "LineDistanceLoss"
   mse_smooth_threshold: 400
 
   n_objects_per_epoch: 15000
@@ -25,7 +25,7 @@ model:
   init_weights: false
   checkpoint: ""
 
-  use_confidences: true
+  use_confidences: false
   heatmap_multiplier: 100.0
   heatmap_softmax: true
 

@@ -31,7 +31,7 @@ class AverageMeter(object):
 def calc_gradient_norm(named_parameters):
     total_norm = 0.0
     for name, p in named_parameters:
-        # print(name)
+        #print(name)
         param_norm = p.grad.data.norm(2)
         total_norm += param_norm.item() ** 2
 

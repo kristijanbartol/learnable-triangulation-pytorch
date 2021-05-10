@@ -1,7 +1,30 @@
 import numpy as np
-
+import itertools
 import torch
 from torch import nn
+
+from mvn.utils.multiview import distance_between_projections
+
+
+class LineProjectionDistancesLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, keypoints_pred, Ks, Rs, ts):
+        #bbox_height = np.abs(bboxes[:, :, 0, 0] - bboxes[:, :, 1, 0])
+        #keypoints_pred *= np.expand_dims(np.expand_dims(bbox_height / 384., axis=-1), axis=-1)
+        #keypoints_pred += np.expand_dims(bboxes[:, :, 0, :], axis=2)
+
+        mean_dists_sum = 0.
+        for view_comb in itertools.combinations(range(keypoints_pred.shape[1]), 2):
+            # NOTE: Works for batch_size=1.
+            R_rel = Rs[0, view_comb[1]] @ torch.inverse(Rs[0, view_comb[0]])
+            dists = distance_between_projections(
+                keypoints_pred[0, view_comb[0]], keypoints_pred[0, view_comb[1]], 
+                Ks[0, view_comb], Rs[0, 0], R_rel, ts[0, view_comb])
+            mean_dists_sum += dists.mean()
+        # TODO: Update magic number 6.
+        return mean_dists_sum / 6
 
 
 class KeypointsMSELoss(nn.Module):

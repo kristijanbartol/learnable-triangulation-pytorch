@@ -191,3 +191,38 @@ def calc_reprojection_error_matrix(keypoints_3d, keypoints_2d_list, proj_matrici
         reprojection_error_matrix.append(reprojection_error)
 
     return np.vstack(reprojection_error_matrix).T
+
+
+def formula(P1, P2, V1, V2):
+    a1 = P1[0]
+    b1 = P1[1]
+    c1 = P1[2]
+    a2 = P2[0]
+    b2 = P2[1]
+    c2 = P2[2]
+
+    a12 = a1 - a2
+    b12 = b1 - b2
+    c12 = c1 - c2
+
+    p1 = V1[:, 0]
+    q1 = V1[:, 1]
+    r1 = V1[:, 2]
+    p2 = V2[:, 0]
+    q2 = V2[:, 1]
+    r2 = V2[:, 2]
+
+    return torch.abs(((q1 * r2 - q2 * r1) * a12 + (r1 * p2 - r2 * p1) * b12 + (p1 * q2 - p2 * q1) * c12) \
+        / torch.sqrt((q1 * r2 - q2 * r1) ** 2 + (r1 * p2 - r2 * p1) ** 2 + (p1 * q2 - p2 * q1) ** 2))
+
+
+def distance_between_projections(x1, x2, Ks, R1, R_rel, ts, device='cuda'):
+    _x1 = torch.cat((x1, torch.ones((x1.shape[0], 1), device=device)), dim=1)
+    _x2 = torch.cat((x2, torch.ones((x2.shape[0], 1), device=device)), dim=1)
+
+    R2 = R_rel @ R1
+
+    p1_ = torch.transpose(torch.inverse(R1) @ torch.inverse(Ks[0]) @ torch.transpose(_x1, 0, 1), 0, 1)
+    p2_ = torch.transpose(torch.inverse(R2) @ torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
+
+    return formula(torch.inverse(R1) @ ts[0, :, 0], torch.inverse(R2) @ ts[1, :, 0], p1_, p2_)

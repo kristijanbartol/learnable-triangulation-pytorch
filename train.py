@@ -23,8 +23,10 @@ from torch.nn.parallel import DistributedDataParallel
 #from tensorboardX import SummaryWriter
 from torch.utils.tensorboard import SummaryWriter
 
-from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
-from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
+from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, \
+    VolumetricTriangulationNet
+from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, \
+    KeypointsL2Loss, VolumetricCELoss, LineProjectionDistancesLoss
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
 from mvn.datasets import human36m
@@ -183,7 +185,8 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                     print("Found None batch")
                     continue
 
-                images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch = dataset_utils.prepare_batch(batch, device, config)
+                images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch, K_batch, R_batch, t_batch, bbox_batch = \
+                    dataset_utils.prepare_batch(batch, device, config)
 
                 keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None
                 if model_type == "alg" or model_type == "ransac":
@@ -215,7 +218,10 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
 
                 # calculate loss
                 total_loss = 0.0
-                loss = criterion(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
+                if isinstance(criterion, LineProjectionDistancesLoss):
+                    loss = criterion(keypoints_2d_pred, K_batch, R_batch, t_batch)
+                else:
+                    loss = criterion(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
                 total_loss += loss
                 metric_dict[f'{config.opt.criterion}'].append(loss.item())
 
@@ -417,7 +423,8 @@ def main(args):
     criterion_class = {
         "MSE": KeypointsMSELoss,
         "MSESmooth": KeypointsMSESmoothLoss,
-        "MAE": KeypointsMAELoss
+        "MAE": KeypointsMAELoss,
+        "LineDistanceLoss": LineProjectionDistancesLoss
     }[config.opt.criterion]
 
     if config.opt.criterion == "MSESmooth":
