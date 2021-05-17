@@ -10,4 +10,4 @@ echo ${REPO_DIR}
 
 docker run --rm --gpus all --name kbartol-learnable -it \
 	-v ${REPO_DIR}:/learnable-triangulation \
-	-v /media/kristijan/kristijan-hdd-ex1/datasets/human36m/:/data/human36m kbartol-learnable
+	-v /media/kristijan/kristijan-hdd-ex/datasets/human36m/:/data/human36m kbartol-learnable
