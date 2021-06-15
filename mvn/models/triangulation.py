@@ -22,7 +22,7 @@ class RANSACTriangulationNet(nn.Module):
         config.model.backbone.vol_confidences = False
         self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
         
-        self.direct_optimization = config.model.direct_optimization
+        #self.direct_optimization = config.model.direct_optimization
 
     def forward(self, images, proj_matricies, batch):
         batch_size, n_views = images.shape[:2]
@@ -61,7 +61,8 @@ class RANSACTriangulationNet(nn.Module):
             for joint_i in range(n_joints):
                 current_proj_matricies = proj_matricies_np[batch_i]
                 points = keypoints_2d_np[batch_i, :, joint_i]
-                keypoint_3d, _ = self.triangulate_ransac(current_proj_matricies, points, direct_optimization=self.direct_optimization)
+                #keypoint_3d, _ = self.triangulate_ransac(current_proj_matricies, points, direct_optimization=self.direct_optimization)
+                keypoint_3d, _ = self.triangulate_ransac(current_proj_matricies, points)
                 keypoints_3d[batch_i, joint_i] = keypoint_3d
 
         keypoints_3d = torch.from_numpy(keypoints_3d).type(torch.float).to(images.device)
@@ -84,7 +85,8 @@ class RANSACTriangulationNet(nn.Module):
         for i in range(n_iters):
             sampled_views = sorted(random.sample(view_set, 2))
 
-            keypoint_3d_in_base_camera = multiview.triangulate_point_from_multiple_views_linear(proj_matricies[sampled_views], points[sampled_views])
+            #keypoint_3d_in_base_camera = multiview.triangulate_point_from_multiple_views_linear(proj_matricies[sampled_views], points[sampled_views])
+            keypoint_3d_in_base_camera = multiview.triangulate_point_from_multiple_views_linear_np(proj_matricies[sampled_views], points[sampled_views])
             reprojection_error_vector = multiview.calc_reprojection_error_matrix(np.array([keypoint_3d_in_base_camera]), points, proj_matricies)[0]
 
             new_inlier_set = set(sampled_views)
@@ -104,7 +106,8 @@ class RANSACTriangulationNet(nn.Module):
         inlier_proj_matricies = proj_matricies[inlier_list]
         inlier_points = points[inlier_list]
 
-        keypoint_3d_in_base_camera = multiview.triangulate_point_from_multiple_views_linear(inlier_proj_matricies, inlier_points)
+        #keypoint_3d_in_base_camera = multiview.triangulate_point_from_multiple_views_linear(inlier_proj_matricies, inlier_points)
+        keypoint_3d_in_base_camera = multiview.triangulate_point_from_multiple_views_linear_np(inlier_proj_matricies, inlier_points)
         reprojection_error_vector = multiview.calc_reprojection_error_matrix(np.array([keypoint_3d_in_base_camera]), inlier_points, inlier_proj_matricies)[0]
         reprojection_error_mean = np.mean(reprojection_error_vector)
 

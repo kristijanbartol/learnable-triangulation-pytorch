@@ -1,9 +1,13 @@
 import numpy as np
 import torch
-
 import kornia
+import copy
+import cv2
 
-IDXS = [3, 1]
+from mvn.utils.trifocal import Trifocal
+
+IDXS = [2, 1]
+#IDXS = [3, 1, 2]
 
 
 class Camera:
@@ -117,7 +121,7 @@ def project_3d_points_to_image_plane_without_distortion(proj_matrix, points_3d, 
         raise TypeError("Works only with numpy arrays and PyTorch tensors.")
 
 
-def triangulate_point_from_multiple_views_linear(proj_matricies, points):
+def triangulate_point_from_multiple_views_linear_np(proj_matricies, points):
     """Triangulates one point from multiple (N) views using direct linear transformation (DLT).
     For more information look at "Multiple view geometry in computer vision",
     Richard Hartley and Andrew Zisserman, 12.2 (p. 312).
@@ -188,6 +192,51 @@ def triangulate_batch_of_points(proj_matricies_batch, points_batch, confidences_
     return point_3d_batch
 
 
+def triangulate_points_multiview_np(Ks, Rs, ts, points_batch):
+    # TODO: Update this in the future.
+    BATCH_SIZE = 1
+    n_joints, n_views = points_batch.shape[:2]
+    points_3d_batch = np.zeros((BATCH_SIZE, n_joints, 3), dtype=np.float32)
+
+    Ps = []
+    for view_i in range(n_views):
+        extr = np.concatenate((Rs[view_i], ts[view_i]), axis=1)
+        Ps.append(Ks[view_i] @ extr)
+    Ps = np.stack(Ps, axis=0)
+
+    for batch_i in range(BATCH_SIZE):
+        for joint_i in range(n_joints):
+            points = points_batch[joint_i]
+
+            point_3d = triangulate_point_from_multiple_views_linear_np(Ps, points)
+            points_3d_batch[batch_i, joint_i] = point_3d
+
+    return points_3d_batch
+
+
+def triangulate_points_multiview_torch(Ks, Rs, ts, points_batch, confidences_batch=None):
+    # TODO: Update this in the future.
+    BATCH_SIZE = 1
+    n_joints, n_views = points_batch.shape[:2]
+    points_3d_batch = torch.zeros((BATCH_SIZE, n_joints, 3), dtype=torch.float32, device=points_batch.device)
+
+    Ps = []
+    for view_i in range(n_views):
+        extr = torch.cat((Rs[view_i], ts[view_i]), axis=1)
+        Ps.append(Ks[view_i] @ extr)
+    Ps = torch.stack(Ps, dim=0)
+
+    for batch_i in range(BATCH_SIZE):
+        for joint_i in range(n_joints):
+            points = points_batch[joint_i]
+            confidences = confidences_batch[joint_i] if confidences_batch is not None else None
+
+            point_3d = triangulate_point_from_multiple_views_linear_torch(Ps, points, confidences)
+            points_3d_batch[batch_i, joint_i] = point_3d
+
+    return points_3d_batch
+
+
 def calc_reprojection_error_matrix(keypoints_3d, keypoints_2d_list, proj_matricies):
     reprojection_error_matrix = []
     for keypoints_2d, proj_matrix in zip(keypoints_2d_list, proj_matricies):
@@ -196,20 +245,6 @@ def calc_reprojection_error_matrix(keypoints_3d, keypoints_2d_list, proj_matrici
         reprojection_error_matrix.append(reprojection_error)
 
     return np.vstack(reprojection_error_matrix).T
-
-
-def essential_from_fundamental(F_mat: torch.Tensor, Ks) -> torch.Tensor:
-    r"""Get Essential matrix from Fundamental and Camera matrices.
-    Uses the method from Hartley/Zisserman 9.6 pag 257 (formula 9.12).
-    Args:
-        F_mat (torch.Tensor): The fundamental matrix with shape of :math:`(*, 3, 3)`.
-        K1 (torch.Tensor): The camera matrix from first camera with shape :math:`(*, 3, 3)`.
-        K2 (torch.Tensor): The camera matrix from second camera with shape :math:`(*, 3, 3)`.
-    Returns:
-        torch.Tensor: The essential matrix with shape :math:`(*, 3, 3)`.
-    """
-
-    return K2.transpose(-2, -1) @ F_mat @ K1
 
 
 def find_rotation_matrices(points, alg_confidences, Ks, device='cuda'):
@@ -225,7 +260,7 @@ def find_rotation_matrices(points, alg_confidences, Ks, device='cuda'):
     E = kornia.essential_from_fundamental(F, K1, K2)
     R1, R2, t = kornia.decompose_essential_matrix(E)
 
-    return R1, R2, t
+    return R1, R2, t, F
 
 
 def compare_rotations(R_matrices, est_proj_matrices):
@@ -244,20 +279,21 @@ def compare_rotations(R_matrices, est_proj_matrices):
     return min(diff1, diff2), np.argmin([diff1, diff2])
 
 
-def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cands, t_cand=None):
+def solve_four_solutions(point_corresponds, Ks, Rs, ts, R_cands, t_rel=None):
     K1 = Ks[0]
     K2 = Ks[1]
 
     R1 = Rs[0]
 
     t1 = ts[0]
+    t2 = ts[1] if t_rel is None else Rs[1] @ torch.inverse(Rs[0]) @ ts[0] + t_rel
 
     extr1 = torch.cat((R1, t1), dim=1)
 
-    if t_cand is not None:
-        candidate_tuples = [(R_cands[0], t_cand), (R_cands[0], -t_cand), (R_cands[1], t_cand), (R_cands[1], -t_cand)]
-    else:
-        candidate_tuples = [(R_cands[0], ts[1]), (R_cands[0], -ts[1]), (R_cands[1], ts[1]), (R_cands[1], -ts[1])]
+#    if t_rel is not None:
+    candidate_tuples = [(R_cands[0], t2), (R_cands[0], -t2), (R_cands[1], t2), (R_cands[1], -t2)]
+#    else:
+#        candidate_tuples = [(R_cands[0], ts[1]), (R_cands[0], -ts[1]), (R_cands[1], ts[1]), (R_cands[1], -ts[1])]
 
     sign_outcomes = []
     sign_condition = lambda x: torch.all(x[:, 2] > 0.)
@@ -295,7 +331,18 @@ def create_fundamental_matrix(Ks, Rs, ts):
     return F
 
 
-def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est, device='cuda'):
+def project(kpts_3d_gt, K, R, t):
+    extr = np.concatenate((R, t), axis=1)
+    kpts_3d_gt = np.concatenate((kpts_3d_gt, 
+        np.ones((kpts_3d_gt.shape[0], kpts_3d_gt.shape[1], 1))), axis=2)
+    kpts_2d_gt = kpts_3d_gt @ np.swapaxes(K @ extr, 0, 1)
+    #kpts_2d_gt 
+
+    return kpts_2d_gt
+
+
+def evaluate_projection_np(kpts_3d_gt, K, R, t):
+    '''
     K1 = Ks[0]
     K2 = Ks[1]
 
@@ -305,6 +352,76 @@ def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est, device='cuda'):
 
     t1 = ts[0]
     t2 = ts[1]
+    '''
+
+    '''
+    extr1 = np.concatenate((R1, t1), axis=1)
+    extr2 = np.concatenate((R2, t2), axis=1)
+    extr2_est = np.concatenate((R2_est, t2), axis=1)
+    '''
+    extr = np.concatenate((R, t), axis=1)
+
+    '''
+    K1 = np.expand_dims(K1, axis=0).repeat(kpts_3d_gt.shape[0], axis=0)
+    K2 = np.expand_dims(K2, axis=0).repeat(kpts_3d_gt.shape[0], axis=0)
+    extr1 = np.expand_dims(extr1, axis=0).repeat(kpts_3d_gt.shape[0], axis=0)
+    extr2 = np.expand_dims(extr2, axis=0).repeat(kpts_3d_gt.shape[0], axis=0)
+    extr2_est = np.expand_dims(extr2_est, axis=0).repeat(kpts_3d_gt.shape[0], axis=0)
+    '''
+    K = np.expand_dims(K, axis=0).repeat(kpts_3d_gt.shape[0], axis=0)
+    extr = np.expand_dims(extr, axis=0).repeat(kpts_3d_gt.shape[0], axis=0)
+
+    if len(kpts_3d_gt.shape) == 2:
+        kpts_3d_gt = np.concatenate((kpts_3d_gt, np.ones((kpts_3d_gt.shape[0], 1))), axis=1)
+    else:
+        kpts_3d_gt = np.concatenate((kpts_3d_gt, np.ones((kpts_3d_gt.shape[0], kpts_3d_gt.shape[1], 1))), axis=2)
+
+    kpts_2d_gt = kpts_3d_gt @ np.swapaxes(K @ extr, 1, 2)
+    kpts_2d_gt = (kpts_2d_gt / kpts_2d_gt[:, :, 2].reshape(kpts_2d_gt.shape[0], kpts_2d_gt.shape[1], 1))[:, :, :2]
+
+    return kpts_2d_gt
+
+
+def find_camera_parameters(x1, x2, x3, K1, K2, K3):
+    x1 = np.hstack((x1, np.ones((x1.shape[0], 1)))).swapaxes(0, 1)
+    x2 = np.hstack((x2, np.ones((x2.shape[0], 1)))).swapaxes(0, 1)
+    x3 = np.hstack((x3, np.ones((x3.shape[0], 1)))).swapaxes(0, 1)
+
+    trifocal = Trifocal(x1, x2, x3)
+    H21, H31 = trifocal.getProjectionMat(from_E=True)
+    #P = trifocal.getProjectionMat(from_E=False)
+    F21, F31 = trifocal.getFundamentalMat()
+
+    # TODO: Try swapping/inverting rotations/intrinsics to try all combinations.
+    E21 = K1.T.dot(F21).dot(K2)
+
+    U, _, Vt = np.linalg.svd(E21)
+    W = np.array([0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]).reshape(3, 3)
+
+    R_sol1 = U.dot(W).dot(Vt)
+    R_sol2 = U.dot(W.T).dot(Vt)
+
+    #E21 = kornia.essential_from_fundamental(F21, K1, K2)
+    #R1, R2, _ = kornia.decompose_essential_matrix(E21)
+
+    #R21 = H21[0, :3, :3]
+    #R31 = H31[0, :3, :3]
+    #t21 = H21[0, :3, 3]
+    #t31 = H31[0, :3, 3]
+
+    #return np.linalg.inv(R21), np.linalg.inv(R31), -t21, -t31
+    #return P[:3, :3], P[:3, 3]
+    
+    return R_sol1, R_sol2, H21[0, :3, :3]
+
+
+def evaluate_projection(kpts_3d_gt, Ks, Rs, t1, t2, R_rel_est, device='cuda'):
+    K1 = Ks[0]
+    K2 = Ks[1]
+
+    R1 = Rs[0]
+    R2 = Rs[1]
+    R2_est = R_rel_est @ R1
 
     extr1 = torch.cat((R1, t1), dim=1)
     extr2 = torch.cat((R2, t2), dim=1)
@@ -331,16 +448,13 @@ def evaluate_projection(kpts_3d_gt, Ks, Rs, ts, R_rel_est, device='cuda'):
     return torch.stack((kpts_2d_gt1, kpts_2d_gt2), dim=0), error_2d
 
 
-def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
+def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, t1, t2, R_rel_est):
     K1 = Ks[0]
     K2 = Ks[1]
 
     R1 = Rs[0]
     R2 = Rs[1]
     R2_est = R_rel_est @ R1
-
-    t1 = ts[0]
-    t2 = ts[1]
 
     extr1 = torch.cat((R1, t1), dim=1)
     extr2 = torch.cat((R2, t2), dim=1)
@@ -353,9 +467,40 @@ def evaluate_reconstruction(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
     kpts_2d_gt1 = kpts_2d[0]
     kpts_2d_gt2 = kpts_2d[1]
 
-    kpts_3d_est = kornia.geometry.triangulate_points(P1, P2_est, kpts_2d_gt1, kpts_2d_gt2)
+    try:
+        kpts_3d_est = kornia.geometry.triangulate_points(P1, P2_est, kpts_2d_gt1, kpts_2d_gt2)
+    except Exception as ex:
+        return None, None
 
     return torch.mean(torch.norm(kpts_3d_gt - kpts_3d_est, dim=2)), kpts_3d_est
+
+
+def evaluate_reconstruction_np(kpts_3d_gt, kpts_2d, Ks, Rs, ts, R_rel_est):
+    K1 = Ks[0]
+    K2 = Ks[1]
+
+    R1 = Rs[0]
+    R2 = Rs[1]
+    R2_est = R_rel_est @ R1
+
+    t1 = ts[0]
+    t2 = ts[1]
+
+    extr1 = np.concatenate((R1, t1), axis=1)
+    extr2 = np.concatenate((R2, t2), axis=1)
+    extr2_est = np.concatenate((R2_est, t2), axis=1)
+
+    P1 = K1 @ extr1
+    P2 = K2 @ extr2
+    P2_est = K2 @ extr2_est
+
+    kpts_2d_gt1 = kpts_2d[0]
+    kpts_2d_gt2 = kpts_2d[1]
+
+    kpts_3d_est = cv2.triangulatePoints(P1, P2_est, kpts_2d_gt1.T, kpts_2d_gt2.T).T
+    kpts_3d_est = kpts_3d_est[:, :3] / kpts_3d_est[:, 3, np.newaxis]
+
+    return np.mean(np.linalg.norm(kpts_3d_gt - kpts_3d_est, ord=2, axis=1)), kpts_3d_est
 
 
 def formula(P1, P2, V1, V2):
@@ -381,7 +526,30 @@ def formula(P1, P2, V1, V2):
         / torch.sqrt((q1 * r2 - q2 * r1) ** 2 + (r1 * p2 - r2 * p1) ** 2 + (p1 * q2 - p2 * q1) ** 2))
 
 
-def distance_between_projections(x1, x2, Ks, R1, R_rel, ts, device='cuda'):
+def formula_np(P1, P2, V1, V2):
+    a1 = P1[0]
+    b1 = P1[1]
+    c1 = P1[2]
+    a2 = P2[0]
+    b2 = P2[1]
+    c2 = P2[2]
+
+    a12 = a1 - a2
+    b12 = b1 - b2
+    c12 = c1 - c2
+
+    p1 = V1[:, 0]
+    q1 = V1[:, 1]
+    r1 = V1[:, 2]
+    p2 = V2[:, 0]
+    q2 = V2[:, 1]
+    r2 = V2[:, 2]
+
+    return np.abs(((q1 * r2 - q2 * r1) * a12 + (r1 * p2 - r2 * p1) * b12 + (p1 * q2 - p2 * q1) * c12) \
+        / np.sqrt((q1 * r2 - q2 * r1) ** 2 + (r1 * p2 - r2 * p1) ** 2 + (p1 * q2 - p2 * q1) ** 2))
+
+
+def distance_between_projections(x1, x2, Ks, R1, R_rel, t1, t2, device='cuda'):
     _x1 = torch.cat((x1, torch.ones((x1.shape[0], 1), device=device)), dim=1)
     _x2 = torch.cat((x2, torch.ones((x2.shape[0], 1), device=device)), dim=1)
 
@@ -390,4 +558,32 @@ def distance_between_projections(x1, x2, Ks, R1, R_rel, ts, device='cuda'):
     p1_ = torch.transpose(torch.inverse(R1) @ torch.inverse(Ks[0]) @ torch.transpose(_x1, 0, 1), 0, 1)
     p2_ = torch.transpose(torch.inverse(R2) @ torch.inverse(Ks[1]) @ torch.transpose(_x2, 0, 1), 0, 1)
 
-    return formula(torch.inverse(R1) @ ts[0, :, 0], torch.inverse(R2) @ ts[1, :, 0], p1_, p2_)
+    return formula(torch.inverse(R1) @ t1[:, 0], torch.inverse(R2) @ t2[:, 0], p1_, p2_)
+
+
+def distance_between_projections_np(x1, x2, K1, K2, R1, R_rel, t1, t2):
+    _x1 = np.concatenate((x1, np.ones((x1.shape[0], 1))), axis=1)
+    _x2 = np.concatenate((x2, np.ones((x2.shape[0], 1))), axis=1)
+
+    R2 = R_rel @ R1
+
+    p1_ = np.swapaxes(np.linalg.inv(R1) @ np.linalg.inv(K1) @ np.swapaxes(_x1, 0, 1), 0, 1)
+    p2_ = np.swapaxes(np.linalg.inv(R2) @ np.linalg.inv(K2) @ np.swapaxes(_x2, 0, 1), 0, 1)
+
+    return formula_np(np.linalg.inv(R1) @ t1[:, 0], np.linalg.inv(R2) @ t2[:, 0], p1_, p2_)
+
+
+def distance_between_line_and_point(a, b, c, x, y):
+    return torch.abs(a * x + b * y + c) / torch.sqrt(a ** 2 + b ** 2)
+
+
+def move_along_epipolar(x1, x2, F):
+    epilines = kornia.geometry.compute_correspond_epilines(torch.unsqueeze(x1, dim=0), F)[0]
+    assert(torch.all(distance_between_line_and_point(epilines[:, 0], epilines[:, 1], epilines[:, 2], x2[:, 0], x2[:, 1]) < 0.01))
+
+    new_x2 = copy.deepcopy(x2)
+    
+    new_x2[:, 0] = new_x2[:, 0] + 30.
+    new_x2[:, 1] = -(epilines[:, 2] + epilines[:, 0] * new_x2[:, 0]) / epilines[:, 1]
+
+    return new_x2

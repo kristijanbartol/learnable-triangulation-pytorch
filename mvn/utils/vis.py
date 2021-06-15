@@ -479,7 +479,8 @@ def draw_2d_pose_cv2(keypoints, img, point_size=2, point_color=(255, 255, 255), 
     return img
 
 
-def draw_3d_pose(keypoints, ax, keypoints_mask=None, kind='cmu', radius=None, root=None, point_size=2, line_width=2, draw_connections=True):
+def draw_3d_pose(keypoints, ax, color, keypoints_mask=None, kind='cmu',
+        radius=None, root=None, point_size=2, line_width=2, draw_connections=True):
     connectivity = CONNECTIVITY_DICT[kind]
 
     if keypoints_mask is None:
@@ -491,14 +492,14 @@ def draw_3d_pose(keypoints, ax, keypoints_mask=None, kind='cmu', radius=None, ro
             if keypoints_mask[joint[0]] and  keypoints_mask[joint[1]]:
                 xs, ys, zs = [np.array([keypoints[joint[0], j], keypoints[joint[1], j]]) for j in range(3)]
 
-                if kind in COLOR_DICT:
-                    color = COLOR_DICT[kind][i]
-                else:
-                    color = (0, 0, 255)
+                #if kind in COLOR_DICT:
+                #    color = COLOR_DICT[kind][i]
+                #else:
+                #    color = (0, 0, 255)
 
-                color = np.array(color) / 255
+                #color = np.array(color) / 255
 
-                ax.plot(xs, ys, zs, lw=line_width, c=color)
+                ax.plot(xs, ys, zs, lw=line_width, c=np.array(color).reshape(1, -1))
 
         if kind == 'coco':
             mid_collarbone = (keypoints[5, :] + keypoints[6, :]) / 2
@@ -527,7 +528,7 @@ def draw_3d_pose(keypoints, ax, keypoints_mask=None, kind='cmu', radius=None, ro
         ax.set_ylim([-radius + yroot, radius + yroot])
         ax.set_zlim([-radius + zroot, radius + zroot])
 
-    ax.set_aspect('equal')
+    #ax.set_aspect('equal')
 
 
     # Get rid of the panes

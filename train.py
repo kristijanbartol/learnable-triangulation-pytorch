@@ -25,7 +25,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
-from mvn.models.autocalibration import Autocalibration
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
 from mvn.datasets import human36m
@@ -155,7 +154,7 @@ def setup_experiment(config, model_name, is_train=True):
     return experiment_dir, writer
 
 
-def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n_iters_total=0, is_train=True, caption='', master=False, experiment_dir=None, writer=None):
+def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_total=0, is_train=True, caption='', master=False, experiment_dir=None, writer=None):
     name = "train" if is_train else "val"
     model_type = config.model.name
 
@@ -164,10 +163,11 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
     Ks_bboxed = torch.empty((0, 4, 3, 3), device='cuda', dtype=torch.float32)
     all_bboxes = torch.empty((0, 4, 2, 2), device='cuda', dtype=torch.float32)
 
-    current_subject_idx = 'S1'
-    camera_params_saved = False
+    all_dists = []
+    all_dists_orig = []
 
-    is_train = False
+    current_subject_idx = 'S9'
+    camera_params_saved = False
 
     if is_train:
         model.train()
@@ -182,6 +182,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
 
     # used to turn on/off gradients
     grad_context = torch.autograd.enable_grad if is_train else torch.no_grad
+    #grad_context = torch.no_grad
     with grad_context():
         end = time.time()
 
@@ -206,9 +207,6 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
                     keypoints_3d_pred, keypoints_2d_pred, heatmaps_pred, confidences_pred = model(images_batch, proj_matricies_batch, batch)
                 elif model_type == "vol":
                     keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, proj_matricies_batch, batch)
-
-                if config.opt.autocalibration:
-                    calib.append(keypoints_2d_pred, bbox_batch)
 
                 batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[3:])
                 n_joints = keypoints_3d_pred.shape[1]
@@ -255,24 +253,18 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
                     total_loss.backward()
                     total_loss_calib_batch += total_loss
 
-                if (config.opt.autocalibration and (iter_i + 1) % config.opt.num_acc_grad == 0) or not config.opt.autocalibration:
+                if is_train:
+                    opt.step()
+                    opt.zero_grad()
+                    #total_loss.backward()
 
-                    if config.opt.autocalibration:
-                        calib.set_camera_params(Ks, Rs, ts)
-                        calib.process()
+                    if hasattr(config.opt, "grad_clip"):
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), config.opt.grad_clip / config.opt.lr)
 
-                    if is_train:
-                        opt.step()
-                        opt.zero_grad()
-                        #total_loss.backward()
+                    metric_dict['grad_norm_times_lr'].append(config.opt.lr * misc.calc_gradient_norm(filter(lambda x: x[1].requires_grad, model.named_parameters())))
 
-                        if hasattr(config.opt, "grad_clip"):
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.opt.grad_clip / config.opt.lr)
-
-                        metric_dict['grad_norm_times_lr'].append(config.opt.lr * misc.calc_gradient_norm(filter(lambda x: x[1].requires_grad, model.named_parameters())))
-
-                        total_loss_calib_batch = 0.
-                        #opt.step()
+                    total_loss_calib_batch = 0.
+                    #opt.step()
 
                 # calculate metrics
                 l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
@@ -370,7 +362,9 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
                     print(n_iters_total, subject_idx)
 
 
+                
                 if subject_idx != current_subject_idx:
+                #if n_iters_total % 100 == 0 and n_iters_total != 0:
                     print(f'Saving data for {subject_idx}...')
                     all_2d_preds = all_2d_preds.cpu().numpy()
                     np.save(os.path.join(save_dir, 'all_2d_preds.npy'), all_2d_preds)
@@ -403,12 +397,40 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
                         np.save(os.path.join(save_dir,'ts.npy'), ts.cpu().numpy())
                         camera_params_saved = True
 
+
                 all_2d_preds = torch.cat((all_2d_preds, keypoints_2d_pred), dim=0)
                 all_3d_gt = torch.cat((all_3d_gt, keypoints_3d_gt), dim=0)
                 Ks_bboxed = torch.cat((Ks_bboxed, K_bboxed), dim=0)
                 all_bboxes = torch.cat((all_bboxes, bbox_batch), dim=0)
+                
 
-    '''
+                # NOTE: If using RANSACNet, the type is int64.
+                #keypoints_2d_pred = torch.tensor(keypoints_2d_pred, dtype=torch.float32, device=keypoints_2d_pred.device)
+
+                '''
+                # Unbbox keypoints.
+                bbox_height = torch.abs(bbox_batch[:, :, 0, 0] - bbox_batch[:, :, 1, 0])
+                keypoints_2d_pred *= torch.unsqueeze(torch.unsqueeze(bbox_height / 384., dim=-1), dim=-1)
+                keypoints_2d_pred += torch.unsqueeze(bbox_batch[:, :, 0, :], dim=2)
+
+                keypoints_2d_pred_reshaped = keypoints_2d_pred.transpose(0, 2).squeeze(dim=2)
+                confidences_pred_reshaped = confidences_pred.transpose(0, 2).squeeze(dim=2)
+
+                triangulated_points = multiview.triangulate_points_multiview_torch(Ks, Rs, ts, keypoints_2d_pred_reshaped)
+                triangulated_points_conf = multiview.triangulate_points_multiview_torch(
+                    Ks, Rs, ts, keypoints_2d_pred_reshaped, confidences_pred_reshaped)
+
+                # NOTE: dim=2 because here you have the batch dimension.
+                dist_orig = torch.mean(torch.norm(keypoints_3d_pred - keypoints_3d_gt, p=2, dim=2))
+                dist = torch.mean(torch.norm(triangulated_points - keypoints_3d_gt, p=2, dim=2))
+                dist_conf = torch.mean(torch.norm(triangulated_points_conf - keypoints_3d_gt, p=2, dim=2))
+
+                #their_eval = dataloader.dataset.evaluate(keypoints_3d_pred)
+                their_eval = torch.sqrt(((keypoints_3d_gt - keypoints_3d_pred) ** 2).sum(2)).mean(1)[0]
+                print(f'(Orig, Trian, Conf, Eval): ({dist_orig:.2f}, {dist:.2f}, {dist_conf:.2f}, {their_eval:.2f})')
+                '''
+
+
     # calculate evaluation metrics
     if master:
         if not is_train:
@@ -437,7 +459,6 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, calib, n
         # dump to tensorboard per-epoch stats
         for title, value in metric_dict.items():
             writer.add_scalar(f"{name}/{title}_epoch", np.mean(value), epoch)
-    '''
 
     return n_iters_total
 
@@ -529,11 +550,6 @@ def main(args):
     if is_distributed:
         model = DistributedDataParallel(model, device_ids=[device])
 
-    if config.opt.autocalibration:
-        calib = Autocalibration()
-    else:
-        calib = None
-
     if not args.eval:
         # train loop
         n_iters_total_train, n_iters_total_val = 0, 0
@@ -541,8 +557,8 @@ def main(args):
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
 
-            n_iters_total_train = one_epoch(model, criterion, opt, config, train_dataloader, device, epoch, calib, n_iters_total=n_iters_total_train, is_train=True, master=master, experiment_dir=experiment_dir, writer=writer)
-            n_iters_total_val = one_epoch(model, criterion, opt, config, val_dataloader, device, epoch, calib, n_iters_total=n_iters_total_val, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer)
+            n_iters_total_train = one_epoch(model, criterion, opt, config, train_dataloader, device, epoch, n_iters_total=n_iters_total_train, is_train=True, master=master, experiment_dir=experiment_dir, writer=writer)
+            n_iters_total_val = one_epoch(model, criterion, opt, config, val_dataloader, device, epoch, n_iters_total=n_iters_total_val, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer)
 
             if master:
                 checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
@@ -553,9 +569,9 @@ def main(args):
             print(f"{n_iters_total_train} iters done.")
     else:
         if args.eval_dataset == 'train':
-            one_epoch(model, criterion, opt, config, train_dataloader, device, 0, calib, n_iters_total=0, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer)
+            one_epoch(model, criterion, opt, config, train_dataloader, device, 0, n_iters_total=0, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer)
         else:
-            one_epoch(model, criterion, opt, config, val_dataloader, device, 0, calib, n_iters_total=0, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer)
+            one_epoch(model, criterion, opt, config, val_dataloader, device, 0, n_iters_total=0, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer)
 
     print("Done.")
 
