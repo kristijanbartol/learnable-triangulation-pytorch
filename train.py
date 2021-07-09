@@ -166,8 +166,11 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
     all_dists = []
     all_dists_orig = []
 
-    current_subject_idx = 'S9'
+    current_subject_idx = 'S1'
+    np_batch_counter = 0
     camera_params_saved = False
+
+    is_train = False
 
     if is_train:
         model.train()
@@ -291,6 +294,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                     results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
                     results['indexes'].append(batch['indexes'])
 
+                '''
                 # plot visualization
                 if master:
 
@@ -299,7 +303,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                         if (config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False):
                             vis_kind = "coco"
 
-                        '''
+                        
                         for batch_i in range(min(batch_size, config.vis_n_elements)):
                             keypoints_vis = vis.visualize_batch(
                                 images_batch, heatmaps_pred, keypoints_2d_pred, proj_matricies_batch,
@@ -329,8 +333,9 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                                     max_n_rows=1, max_n_cols=16
                                 )
                                 writer.add_image(f"{name}/volumes/{batch_i}", volumes_vis.transpose(2, 0, 1), global_step=n_iters_total)
-                        '''
+                        
 
+                    
                     # dump weights to tensoboard
                     if n_iters_total % config.vis_freq == 0:
                         for p_name, p in model.named_parameters():
@@ -357,34 +362,62 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                     # dump to tensorboard per-iter stats about sizes
                     writer.add_scalar(f"{name}/batch_size", batch_size, n_iters_total)
                     writer.add_scalar(f"{name}/n_views", n_views, n_iters_total)
+                    
+                '''
 
-                    n_iters_total += 1
-                    print(n_iters_total, subject_idx)
+                n_iters_total += 1
+                print(n_iters_total, subject_idx)
 
 
                 
+                
                 if subject_idx != current_subject_idx:
                 #if n_iters_total % 100 == 0 and n_iters_total != 0:
+                    
                     print(f'Saving data for {subject_idx}...')
                     all_2d_preds = all_2d_preds.cpu().numpy()
-                    np.save(os.path.join(save_dir, 'all_2d_preds.npy'), all_2d_preds)
+                    np.save(os.path.join(save_dir, f'all_2d_preds{np_batch_counter}.npy'), all_2d_preds)
 
                     all_3d_gt = all_3d_gt.cpu().numpy()
-                    np.save(os.path.join(save_dir,'all_3d_gt.npy'), all_3d_gt)
+                    np.save(os.path.join(save_dir, f'all_3d_gt{np_batch_counter}.npy'), all_3d_gt)
 
                     Ks_bboxed = Ks_bboxed.cpu().numpy()
-                    np.save(os.path.join(save_dir,'Ks_bboxed.npy'), Ks_bboxed)
+                    np.save(os.path.join(save_dir, f'Ks_bboxed{np_batch_counter}.npy'), Ks_bboxed)
 
                     all_bboxes = all_bboxes.cpu().numpy()
-                    np.save(os.path.join(save_dir,'all_bboxes.npy'), all_bboxes)
+                    np.save(os.path.join(save_dir, f'all_bboxes{np_batch_counter}.npy'), all_bboxes)
+
+                    all_2d_preds = torch.empty((0, 4, 17, 2), device='cuda', dtype=torch.float32)
+                    all_3d_gt = torch.empty((0, 17, 3), device='cuda', dtype=torch.float32)
+                    Ks_bboxed = torch.empty((0, 4, 3, 3), device='cuda', dtype=torch.float32)
+                    all_bboxes = torch.empty((0, 4, 2, 2), device='cuda', dtype=torch.float32)
+                    
+
+                    current_subject_idx = subject_idx
+                    camera_params_saved = False
+                    np_batch_counter = 0
+                
+                elif n_iters_total % 1000 == 0 and n_iters_total != 0:
+                    print(f'Saving data for {subject_idx} ({n_iters_total} iterations)...')
+                    all_2d_preds = all_2d_preds.cpu().numpy()
+                    np.save(os.path.join(save_dir, f'all_2d_preds{np_batch_counter}.npy'), all_2d_preds)
+
+                    all_3d_gt = all_3d_gt.cpu().numpy()
+                    np.save(os.path.join(save_dir, f'all_3d_gt{np_batch_counter}.npy'), all_3d_gt)
+
+                    Ks_bboxed = Ks_bboxed.cpu().numpy()
+                    np.save(os.path.join(save_dir, f'Ks_bboxed{np_batch_counter}.npy'), Ks_bboxed)
+
+                    all_bboxes = all_bboxes.cpu().numpy()
+                    np.save(os.path.join(save_dir, f'all_bboxes{np_batch_counter}.npy'), all_bboxes)
 
                     all_2d_preds = torch.empty((0, 4, 17, 2), device='cuda', dtype=torch.float32)
                     all_3d_gt = torch.empty((0, 17, 3), device='cuda', dtype=torch.float32)
                     Ks_bboxed = torch.empty((0, 4, 3, 3), device='cuda', dtype=torch.float32)
                     all_bboxes = torch.empty((0, 4, 2, 2), device='cuda', dtype=torch.float32)
 
-                    current_subject_idx = subject_idx
-                    camera_params_saved = False
+                    np_batch_counter += 1
+
                 else:
                     if not camera_params_saved:
                         save_dir = os.path.join('results/', subject_idx)
@@ -430,7 +463,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                 print(f'(Orig, Trian, Conf, Eval): ({dist_orig:.2f}, {dist:.2f}, {dist_conf:.2f}, {their_eval:.2f})')
                 '''
 
-
+    exit()
     # calculate evaluation metrics
     if master:
         if not is_train:

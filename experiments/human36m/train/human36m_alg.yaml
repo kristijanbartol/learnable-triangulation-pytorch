@@ -36,7 +36,7 @@ model:
     name: "resnet152"
     style: "simple"
 
-    init_weights: true
+    init_weights: false
     checkpoint: "./data/pretrained/human36m/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17

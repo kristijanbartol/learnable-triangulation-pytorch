@@ -18,19 +18,20 @@ from mvn.utils.vis import draw_2d_pose_cv2, draw_images, draw_epipolar_lines, dr
 from mvn.utils.img import denormalize_image, image_batch_to_numpy
 
 
-SUBJECT_IDX = 9
+SUBJECT_IDX = 1
+#IDXS = [3, 1]
 
 
 DATA_ROOT = f'./results/S{SUBJECT_IDX}/'
 
-IMGS_PATH = os.path.join(DATA_ROOT, 'all_images.npy')
-PRED_PATH = os.path.join(DATA_ROOT, 'all_2d_preds.npy')
-GT_PATH = os.path.join(DATA_ROOT, 'all_3d_gt.npy')
-KS_BBOX_PATH = os.path.join(DATA_ROOT, 'Ks_bboxed.npy')
+IMGS_PATH = os.path.join(DATA_ROOT, 'all_images0.npy')
+PRED_PATH = os.path.join(DATA_ROOT, 'all_2d_preds0.npy')
+GT_PATH = os.path.join(DATA_ROOT, 'all_3d_gt0.npy')
+KS_BBOX_PATH = os.path.join(DATA_ROOT, 'Ks_bboxed0.npy')
 K_PATH = os.path.join(DATA_ROOT, 'Ks.npy')
 R_PATH = os.path.join(DATA_ROOT, 'Rs.npy')
 T_PATH = os.path.join(DATA_ROOT, 'ts.npy')
-BBOX_PATH = os.path.join(DATA_ROOT, 'all_bboxes.npy')
+BBOX_PATH = os.path.join(DATA_ROOT, 'all_bboxes0.npy')
 
 M = 50             # number of frames
 J = 17              # number of joints
@@ -43,9 +44,6 @@ I = 0
 D = 1.             # distance criterion
 T = int(N/20)              # number of top candidates to use
 
-
-
-IDXS = [0, 1]
 
 
 def load_camera_params(subject_idx, cam_idxs):
@@ -90,6 +88,8 @@ if __name__ == '__main__':
 
         frame_selection = np.random.choice(np.arange(all_2d_preds.shape[0]), size=M)
         #frame_selection = np.arange(50)
+        #frame_selection = np.arange(all_2d_preds.shape[0])  # using all available frames for sampling in each run
+
         all_2d_preds = all_2d_preds[frame_selection][:, IDXS]
         all_3d_gt = all_3d_gt[frame_selection]
         bboxes = bboxes[frame_selection][:, IDXS]
@@ -142,6 +142,7 @@ if __name__ == '__main__':
             try:
                 R_gt1, R_gt2, t_rel, F = find_rotation_matrices(inliers, None, Ks)
             except Exception as ex:
+                #t_rel = t2 - t1
                 print(f'[GT data + GT camera params] {ex}')
 
             scale = (t_rel_gt / t_rel[0]).mean()
@@ -298,7 +299,9 @@ if __name__ == '__main__':
                         invalid_counter += 1
                         continue
 
-                    quaternion = kornia.rotation_matrix_to_quaternion(R_initial)
+                    quaternion_initial = kornia.rotation_matrix_to_quaternion(R_initial)
+                    quaternion_gt = kornia.rotation_matrix_to_quaternion(R_gt)
+                    quat_norm = torch.norm(quaternion_gt - quaternion_initial, p=1)
 
                     line_dists_inlier = distance_between_projections(
                         point_corresponds[condition_initial][:, 0], point_corresponds[condition_initial][:, 1], Ks[0], 
@@ -308,13 +311,13 @@ if __name__ == '__main__':
                         Rs[0, 0], R_initial, ts[0][0], t2)
                     
                     line_dist_error_pair = torch.unsqueeze(torch.cat(
-                        (quaternion,
+                        (quaternion_initial,
                         torch.unsqueeze(num_inliers_initial, dim=0), 
                         torch.unsqueeze(line_dists_all.mean(), dim=0),
                         torch.unsqueeze(error_2d, dim=0),
                         torch.unsqueeze(error_3d, dim=0)), dim=0), dim=0)
                     line_dist_error_pairs = torch.cat((line_dist_error_pairs, line_dist_error_pair), dim=0)
-                    print(f'{counter}. ({num_inliers_initial}, {line_dists_inlier.mean():.3f}, {line_dists_all.mean():.3f}) -> {error_2d:.2f}, {error_3d:.2f}')
+                    print(f'{counter}. ({num_inliers_initial}, {line_dists_inlier.mean():.3f}, {line_dists_all.mean():.3f}) -> {quat_norm:.4f} {error_2d:.2f}, {error_3d:.2f}')
 
                     counter += 1
 

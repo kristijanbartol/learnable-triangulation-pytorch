@@ -6,7 +6,7 @@ import cv2
 
 from mvn.utils.trifocal import Trifocal
 
-IDXS = [2, 1]
+IDXS = [3, 1]
 #IDXS = [3, 1, 2]
 
 
